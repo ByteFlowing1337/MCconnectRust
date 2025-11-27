@@ -95,8 +95,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn run_host(client: Client, port: u16) -> Result<(), Box<dyn std::error::Error>> {
     println!("正在创建 Steam 大厅...");
     
-    // 创建好友可见的大厅
-    client.matchmaking().create_lobby(LobbyType::FriendsOnly, 10, |result| {
+    // 创建公开大厅 (允许非好友通过 ID 加入)
+    client.matchmaking().create_lobby(LobbyType::Public, 10, |result| {
         match result {
             Ok(lobby_id) => {
                 println!("\n>>> 房间创建成功! <<<");
@@ -189,18 +189,38 @@ fn run_host(client: Client, port: u16) -> Result<(), Box<dyn std::error::Error>>
 /// ================= 客机逻辑 (Client) =================
 fn run_client(client: Client, lobby_id: LobbyId) -> Result<(), Box<dyn std::error::Error>> {
     println!("正在加入房间: {}", lobby_id.raw());
-    client.matchmaking().join_lobby(lobby_id, |result| {
-        match result {
-            Ok(_) => println!(">>> 加入成功! <<<"),
-            Err(e) => println!("加入失败: {:?}", e),
-        }
+    
+    let (tx, rx) = std::sync::mpsc::channel();
+    client.matchmaking().join_lobby(lobby_id, move |result| {
+        let _ = tx.send(result);
     });
 
-    // 等待一会儿以获取大厅信息（特别是房主 ID）
-    thread::sleep(Duration::from_secs(2)); // 简单粗暴等待同步
+    // 循环等待加入结果，同时必须运行回调
+    loop {
+        client.run_callbacks();
+        if let Ok(result) = rx.try_recv() {
+            match result {
+                Ok(_) => {
+                    println!(">>> 加入成功! <<<");
+                    break;
+                }
+                Err(e) => {
+                    println!("加入失败: {:?}", e);
+                    println!("可能原因: 房间不存在(房主已关闭)、房间非公开(需好友关系)或网络问题。");
+                    return Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, "Failed to join lobby")));
+                }
+            }
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
 
     let host_id = client.matchmaking().lobby_owner(lobby_id);
     println!("房主 Steam ID: {:?}", host_id);
+
+    if host_id == client.user().steam_id() {
+        println!("!!! 警告: 你正在尝试连接自己 (Steam ID 相同) !!!");
+        println!("!!! Steam P2P 不支持本地回环连接，请使用两个不同的 Steam 账号进行测试 !!!");
+    }
 
     // 启动本地监听
     let listener = TcpListener::bind(format!("0.0.0.0:{}", CLIENT_LISTEN_PORT))?;
