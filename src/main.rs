@@ -144,13 +144,16 @@ fn run_host(client: Client, port: u16) -> Result<(), Box<dyn std::error::Error>>
                                 loop {
                                     match read_stream.read(&mut buffer) {
                                         Ok(n) if n > 0 => {
+                                            // println!("MC Server -> Steam: {} bytes", n); // Debug Log
                                             // SendReliable: 对应 TCP，保证顺序和必达
-                                            client_clone.networking().send_p2p_packet(
+                                            if !client_clone.networking().send_p2p_packet(
                                                 steam_id, 
                                                 SendType::Reliable, 
                                                 &buffer[0..n]
                                                 
-                                            );
+                                            ) {
+                                                println!("Host send_p2p_packet failed!");
+                                            }
                                         }
                                         _ => break, // 连接断开
                                     }
@@ -169,6 +172,7 @@ fn run_host(client: Client, port: u16) -> Result<(), Box<dyn std::error::Error>>
 
                 // 将 Steam 收到的数据写入本地 TCP
                 if let Some(stream) = client_streams.get_mut(&steam_id) {
+                    // println!("Steam -> MC Server: {} bytes", len); // Debug Log
                     if let Err(_) = stream.write_all(data) {
                         // 写入失败，说明连接断了，移除
                         client_streams.remove(&steam_id);
@@ -278,6 +282,7 @@ fn run_client(client: Client, lobby_id: LobbyId) -> Result<(), Box<dyn std::erro
                 // 如果收到空包（握手包），忽略
                 if len == 0 { continue; }
                 
+                // println!("Steam -> Client: {} bytes", len); // Debug Log
                 if let Some(ref mut stream) = local_stream {
                     let _ = stream.write_all(&buf[0..len]);
                 }
