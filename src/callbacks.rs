@@ -16,40 +16,48 @@ impl CallbackRegistry {
         let join_lobby_clone = Arc::clone(&join_lobby_id);
 
         let join_handle = client.register_callback(move |val: GameLobbyJoinRequested| {
-            println!("\n>>> 收到好友邀请！准备加入大厅: {:?}", val.lobby_steam_id);
+            println!("\n┌─────────────────────────────────────");
+            println!("│  收到好友邀请！");
+            println!("│ 房间 ID: {:?}", val.lobby_steam_id);
+            println!("│ 准备加入大厅...");
+            println!("└─────────────────────────────────────");
             *join_lobby_clone.lock().unwrap() = Some(val.lobby_steam_id);
         });
 
         let client_p2p = client.clone();
         let p2p_handle = client.register_callback(move |req: P2PSessionRequest| {
-            println!(">>> 收到 P2P 连接请求，来自: {:?}，已自动接受。", req.remote);
+            println!("┌─────────────────────────────────────");
+            println!("│ 收到 P2P 连接请求");
+            println!("│ 来自: {:?}", req.remote);
+            println!("│ 状态: 已自动接受");
+            println!("└─────────────────────────────────────");
             client_p2p.networking().accept_p2p_session(req.remote);
         });
 
         let p2p_fail_handle = client.register_callback(|fail: P2PSessionConnectFail| {
-            println!(
-                "!!! P2P 连接失败: {:?}, 错误码 {} ({})",
-                fail.remote,
-                fail.error,
-                describe_p2p_error(fail.error)
-            );
+            println!("┌─────────────────────────────────────");
+            println!("│ ✗ P2P 连接失败");
+            println!("│ 对方: {:?}", fail.remote);
+            println!("│ 错误码: {} ({})", fail.error, describe_p2p_error(fail.error));
+            println!("│ 提示: 检查对方是否在线且运行相同应用");
+            println!("└─────────────────────────────────────");
         });
 
         let net_status_handle = client.register_callback(move |event: NetConnectionStatusChanged| {
             let current_state = event.connection_info.state();
-            println!(
-                ">>> 连接状态变更: {:?} -> {:?}",
-                event.old_state,
-                current_state
-            );
+            println!("┌─────────────────────────────────────");
+            println!("│  连接状态变更");
+            println!("│ 旧状态: {:?}", event.old_state);
+            println!("│ 新状态: {:?}", current_state);
 
             if let Some(remote) = event.connection_info.identity_remote() {
-                println!("连接来自: {:?}", remote);
+                println!("│ 远程: {:?}", remote);
             }
 
             if let Some(reason) = event.connection_info.end_reason() {
-                println!("Steam 标记的结束原因: {:?}", reason);
+                println!("│ 结束原因: {:?}", reason);
             }
+            println!("└─────────────────────────────────────");
 
             /*
             if event.old_state != NetworkingConnectionState::Connected {

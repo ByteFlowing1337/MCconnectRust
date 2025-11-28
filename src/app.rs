@@ -13,23 +13,22 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Warm up SDR relay access so fallback is ready before gameplay starts.
     let relay_utils = client.networking_utils();
     relay_utils.init_relay_network_access();
-    println!(
-        "已启用 Steam 中继，当前状态: {:?}",
-        relay_utils.relay_network_status()
-    );
+    let relay_status = relay_utils.relay_network_status();
+    
+    println!("\n╔════════════════════════════════════════════╗");
+    println!("║   🎮 Steam MC Connect Tool v0.1.0         ║");
+    println!("╠════════════════════════════════════════════╣");
+    println!("║ Steam 用户: {:<31}║", client.friends().name());
+    println!("║ 中继状态: {:<32}║", format!("{:?}", relay_status));
+    println!("╚════════════════════════════════════════════╝\n");
 
     let callbacks = CallbackRegistry::register(&client);
 
-    println!("------------------------------------------------");
-    println!(">>> Steam MC Connect Tool <<<");
-    println!("当前 Steam 用户: {}", client.friends().name());
-    println!("------------------------------------------------");
-
     println!("请选择模式:");
-    println!("1. [主机] 创建房间 (我是服主)");
-    println!("2. [客机] 加入房间 (输入房间号)");
-    println!("3. [自动] 等待好友邀请/加入");
-    print!("请输入 > ");
+    println!("  1.  [主机] 创建房间 (我是服主)");
+    println!("  2.  [客机] 加入房间 (输入房间号)");
+    println!("  3.  [自动] 等待好友邀请/加入");
+    print!("\n请输入 > ");
     std::io::stdout().flush()?;
 
     let mut input = String::new();
@@ -46,7 +45,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn run_host_mode(client: Client) -> Result<(), Box<dyn std::error::Error>> {
-    print!("请输入本地 MC 服务器端口 (默认 25565) > ");
+    print!("\n  请输入本地 MC 服务器端口 (默认 25565) > ");
     std::io::stdout().flush()?;
     let mut port_str = String::new();
     io::stdin().read_line(&mut port_str)?;
@@ -68,14 +67,14 @@ fn run_client_mode(
     if let Some(lobby_id) = target_lobby {
         run_client(client, lobby_id)?;
     } else {
-        println!("无效的大厅 ID");
+        println!(" 无效的大厅 ID");
     }
 
     Ok(())
 }
 
 fn ask_lobby_id() -> Result<Option<LobbyId>, Box<dyn std::error::Error>> {
-    print!("请输入对方的房间号 (Lobby ID) > ");
+    print!("\n 请输入对方的房间号 (Lobby ID) > ");
     std::io::stdout().flush()?;
     let mut id_str = String::new();
     io::stdin().read_line(&mut id_str)?;
@@ -85,7 +84,7 @@ fn ask_lobby_id() -> Result<Option<LobbyId>, Box<dyn std::error::Error>> {
 }
 
 fn wait_for_invite(client: &Client, callbacks: &CallbackRegistry) -> Option<LobbyId> {
-    println!("正在等待好友邀请... (保持此界面不动)");
+    println!("\n 正在等待好友邀请... (保持此界面不动)");
     loop {
         client.run_callbacks();
         if let Some(id) = *callbacks.join_lobby_id.lock().unwrap() {
