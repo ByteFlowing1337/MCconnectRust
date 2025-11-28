@@ -1,4 +1,6 @@
-use crate::util::send_reliable_with_retry;
+use crate::config::BUFFER_SIZE;
+use crate::metrics;
+use crate::send_queue::SendQueue;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -28,18 +30,31 @@ pub fn run_host(client: Client, port: u16) -> Result<(), Box<dyn std::error::Err
     let mut client_streams: HashMap<SteamId, TcpStream> = HashMap::new();
     println!(" 等待来自 Steam 的 P2P 数据，MC 端口: {}", port);
 
+    // 性能统计会话
+    let session_metrics = metrics::SessionMetrics::new();
+    let mut last_report_time = Instant::now();
+
     while RUNNING.load(Ordering::Relaxed) {
         client.run_callbacks();
+
+        // 定期打印性能报告 (每 5 秒)
+        if last_report_time.elapsed() > Duration::from_secs(5) {
+            session_metrics.print_report();
+            last_report_time = Instant::now();
+        }
 
         while let Some(size) = client.networking().is_p2p_packet_available() {
             let mut buf = vec![0; size];
             if let Some((steam_id, len)) = client.networking().read_p2p_packet(&mut buf) {
                 if len == 0 {
-                    println!(" 收到来自 {:?} 的 Steam keep-alive", steam_id);
                     continue;
                 }
 
+                // 记录接收指标
+                metrics::record_packet_received(len as u64);
+
                 let data = &buf[..len];
+
 
                 if !client_streams.contains_key(&steam_id) {
                     println!("┌─────────────────────────────────────");
@@ -63,8 +78,12 @@ pub fn run_host(client: Client, port: u16) -> Result<(), Box<dyn std::error::Err
                     let client_clone = client.clone();
                     let steam_id_clone = steam_id;
 
+                    // 创建异步发送队列
+                    let send_queue = SendQueue::new(client_clone.clone(), steam_id_clone);
+
                     thread::spawn(move || {
-                        let mut buffer = [0u8; 4096];
+                        // 使用配置的大缓冲区
+                        let mut buffer = [0u8; BUFFER_SIZE];
                         let mut total_sent = 0u64;
                         let mut packet_count = 0u32;
                         
@@ -78,13 +97,15 @@ pub fn run_host(client: Client, port: u16) -> Result<(), Box<dyn std::error::Err
                                     total_sent += n as u64;
                                     packet_count += 1;
                                     
-                                    if !send_reliable_with_retry(
-                                        &client_clone,
-                                        steam_id_clone,
-                                        &buffer[..n],
-                                    ) {
-                                        println!("⚠ 警告: MC→Steam 转发失败 {:?}", steam_id_clone);
-                                        break;
+                                    // 记录发送指标
+                                    metrics::record_packet_sent(n as u64);
+
+                                    // 使用异步队列发送
+                                    if !send_queue.send(buffer[..n].to_vec()) {
+                                        println!("⚠ 警告: 发送队列满或断开，丢弃数据 {:?}", steam_id_clone);
+                                        // 注意：这里我们不立即断开连接，而是允许丢包，
+                                        // 因为队列满可能是暂时的。但如果持续满，可能会有问题。
+                                        // 也可以选择 break 断开。
                                     }
                                 }
                                 Err(e) => {
@@ -101,12 +122,7 @@ pub fn run_host(client: Client, port: u16) -> Result<(), Box<dyn std::error::Err
                         println!("│ [断开] 玩家 {:?}", steam_id_clone);
                         println!("│ 持续时间: {:.2}秒", duration_secs);
                         println!("│ 转发数据: {} 字节 ({} 包)", total_sent, packet_count);
-                        
-                        if duration_secs < 3.0 && packet_count < 5 {
-                            println!("│ 类型: 疑似 Server List Ping");
-                        } else {
-                            println!("│ 类型: 游戏会话");
-                        }
+                        println!("│ 平均吞吐: {:.2} MB/s", total_sent as f32 / duration_secs / 1024.0 / 1024.0);
                         println!("└─────────────────────────────────────");
                         
                         client_clone.networking().close_p2p_session(steam_id_clone);
@@ -116,17 +132,19 @@ pub fn run_host(client: Client, port: u16) -> Result<(), Box<dyn std::error::Err
                     println!(" 当前活跃玩家: {}", client_streams.len());
                 }
 
-                if let Some(stream) = client_streams.get_mut(&steam_id) {
-                    if let Err(e) = stream.write_all(data) {
-                        println!("┌─────────────────────────────────────");
-                        println!("│ [错误] 写入 MC 失败");
-                        println!("│ 玩家: {:?}", steam_id);
-                        println!("│ 原因: {:?}", e);
-                        println!("└─────────────────────────────────────");
-                        
-                        client.networking().close_p2p_session(steam_id);
-                        client_streams.remove(&steam_id);
-                        println!("当前活跃玩家: {}", client_streams.len());
+                if !is_handshake {
+                    if let Some(stream) = client_streams.get_mut(&steam_id) {
+                        if let Err(e) = stream.write_all(data) {
+                            println!("┌─────────────────────────────────────");
+                            println!("│ [错误] 写入 MC 失败");
+                            println!("│ 玩家: {:?}", steam_id);
+                            println!("│ 原因: {:?}", e);
+                            println!("└─────────────────────────────────────");
+                            
+                            client.networking().close_p2p_session(steam_id);
+                            client_streams.remove(&steam_id);
+                            println!("当前活跃玩家: {}", client_streams.len());
+                        }
                     }
                 }
             }

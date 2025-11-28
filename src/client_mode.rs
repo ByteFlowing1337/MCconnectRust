@@ -1,4 +1,6 @@
-use crate::config::CLIENT_LISTEN_PORT;
+use crate::config::{BUFFER_SIZE, CLIENT_LISTEN_PORT};
+use crate::metrics;
+use crate::send_queue::SendQueue;
 use crate::util::send_reliable_with_retry;
 use std::io::{ErrorKind, Read, Write};
 use std::net::TcpListener;
@@ -46,8 +48,18 @@ pub fn run_client(client: Client, lobby_id: LobbyId) -> Result<(), Box<dyn std::
     let (disconnect_tx, disconnect_rx) = mpsc::channel();
     listener.set_nonblocking(true)?;
 
+    // 性能统计会话
+    let session_metrics = metrics::SessionMetrics::new();
+    let mut last_report_time = Instant::now();
+
     loop {
         client.run_callbacks();
+
+        // 定期打印性能报告
+        if last_report_time.elapsed() > Duration::from_secs(5) {
+            session_metrics.print_report();
+            last_report_time = Instant::now();
+        }
 
         while disconnect_rx.try_recv().is_ok() {
             println!("检测到本地 MC 连接断开，等待重新连接...");
@@ -71,8 +83,12 @@ pub fn run_client(client: Client, lobby_id: LobbyId) -> Result<(), Box<dyn std::
                     let target_host = host_id;
                     let tx = disconnect_tx.clone();
 
+                    // 创建异步发送队列
+                    let send_queue = SendQueue::new(client_clone.clone(), target_host);
+
                     thread::spawn(move || {
-                        let mut buffer = [0u8; 4096];
+                        // 使用配置的大缓冲区
+                        let mut buffer = [0u8; BUFFER_SIZE];
                         let mut total_sent = 0u64;
                         let mut packet_count = 0u32;
                         
@@ -82,8 +98,13 @@ pub fn run_client(client: Client, lobby_id: LobbyId) -> Result<(), Box<dyn std::
                                     total_sent += n as u64;
                                     packet_count += 1;
                                     
-                                    if !send_reliable_with_retry(&client_clone, target_host, &buffer[..n]) {
-                                        println!("⚠ 警告: 客机向房主发送数据失败，可能正在重试");
+                                    // 记录发送指标
+                                    metrics::record_packet_sent(n as u64);
+
+                                    // 使用异步队列发送
+                                    if !send_queue.send(buffer[..n].to_vec()) {
+                                        println!("⚠ 警告: 发送队列满或断开，丢弃数据");
+                                        metrics::record_packet_dropped();
                                     }
                                 }
                                 Ok(_) => break,
@@ -101,18 +122,13 @@ pub fn run_client(client: Client, lobby_id: LobbyId) -> Result<(), Box<dyn std::
                         println!("│ [断开] 本地 MC 连接已断开");
                         println!("│ 持续时间: {:.2}秒", duration_secs);
                         println!("│ 发送数据: {} 字节 ({} 包)", total_sent, packet_count);
-                        
-                        if duration_secs < 3.0 && packet_count < 5 {
-                            println!("│ 类型: 疑似 Server List Ping (刷新服务器列表)");
-                        } else {
-                            println!("│ 类型: 游戏会话");
-                        }
+                        println!("│ 平均吞吐: {:.2} MB/s", total_sent as f32 / duration_secs / 1024.0 / 1024.0);
                         println!("└─────────────────────────────────────");
                         
                         let _ = tx.send(());
                     });
 
-                    // 发送空包触发握手
+                    // 发送空包触发握手 (仍使用同步发送以确保握手到达)
                     if !send_reliable_with_retry(&client, host_id, &[0]) {
                         println!("警告: 无法向房主发送握手包，请稍后重试");
                     }
@@ -130,7 +146,7 @@ pub fn run_client(client: Client, lobby_id: LobbyId) -> Result<(), Box<dyn std::
             let mut buf = vec![0; size];
             if let Some((steam_id, len)) = client.networking().read_p2p_packet(&mut buf) {
                 if len == 0 {
-                    println!("💓 收到来自 {:?} 的 keep-alive 包", steam_id);
+                    // println!("💓 收到来自 {:?} 的 keep-alive 包", steam_id);
                     continue;
                 }
 
@@ -139,7 +155,10 @@ pub fn run_client(client: Client, lobby_id: LobbyId) -> Result<(), Box<dyn std::
                     continue;
                 }
 
-                // 确保不越界：使用实际读取到的数据长度和缓冲区大小中的较小值
+                // 记录接收指标
+                metrics::record_packet_received(len as u64);
+
+                // 确保不越界
                 let actual_len = len.min(buf.len());
                 
                 if let Some(ref mut stream) = local_stream {
