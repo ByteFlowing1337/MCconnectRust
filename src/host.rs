@@ -55,6 +55,7 @@ pub fn run_host(client: Client, port: u16) -> Result<(), Box<dyn std::error::Err
 
                 let data = &buf[..len];
 
+                let is_handshake = len == 1 && data[0] == 0;
 
                 if !client_streams.contains_key(&steam_id) {
                     println!("┌─────────────────────────────────────");
