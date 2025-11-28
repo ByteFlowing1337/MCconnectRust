@@ -1,0 +1,2 @@
+pub const MC_SERVER_PORT: u16 = 25565;
+pub const CLIENT_LISTEN_PORT: u16 = 55555;
