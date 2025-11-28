@@ -61,6 +61,9 @@ pub fn run_client(client: Client, lobby_id: LobbyId) -> Result<(), Box<dyn std::
                     println!("┌─────────────────────────────────────");
                     println!("│ [连接] MC 客户端请求连接: {}", addr);
                     println!("└─────────────────────────────────────");
+                    
+                    // 设置为阻塞模式，避免 WouldBlock 错误
+                    let _ = stream.set_nonblocking(false);
                     let _ = stream.set_nodelay(true);
 
                     let mut read_stream = stream.try_clone()?;
@@ -127,23 +130,26 @@ pub fn run_client(client: Client, lobby_id: LobbyId) -> Result<(), Box<dyn std::
             let mut buf = vec![0; size];
             if let Some((steam_id, len)) = client.networking().read_p2p_packet(&mut buf) {
                 if len == 0 {
-                    println!("💓收到来自 {:?} 的 keep-alive 包", steam_id);
+                    println!("💓 收到来自 {:?} 的 keep-alive 包", steam_id);
                     continue;
                 }
 
                 if steam_id != host_id {
-                    println!(" 忽略来自 {:?} 的数据 (期望 {:?})", steam_id, host_id);
+                    println!("⚠ 忽略来自 {:?} 的数据 (期望 {:?})", steam_id, host_id);
                     continue;
                 }
 
+                // 确保不越界：使用实际读取到的数据长度和缓冲区大小中的较小值
+                let actual_len = len.min(buf.len());
+                
                 if let Some(ref mut stream) = local_stream {
-                    if let Err(e) = stream.write_all(&buf[..len]) {
-                        println!(" 写入本地 MC 失败: {:?}", e);
+                    if let Err(e) = stream.write_all(&buf[..actual_len]) {
+                        println!("✗ 写入本地 MC 失败: {:?}", e);
                         local_stream = None;
-                        println!("⚠ Steam 数据 {} bytes 被丢弃，等待 MC 重新连接", len);
+                        println!("⚠ Steam 数据 {} bytes 被丢弃，等待 MC 重新连接", actual_len);
                     }
                 } else {
-                    println!("⚠ 收到 Steam 数据 {} bytes 但 MC 未连接 (缓冲中...)", len);
+                    println!("⚠ 收到 Steam 数据 {} bytes 但 MC 未连接 (缓冲中...)", actual_len);
                 }
             }
         }
