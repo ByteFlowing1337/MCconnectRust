@@ -31,6 +31,7 @@ pub fn run_host(client: Client, port: u16) -> Result<(), Box<dyn std::error::Err
             let mut buf = vec![0; size];
             if let Some((steam_id, len)) = client.networking().read_p2p_packet(&mut buf) {
                 if len == 0 {
+                    println!("收到来自 {:?} 的 Steam keep-alive (0 bytes)", steam_id);
                     continue;
                 }
 
@@ -78,10 +79,12 @@ pub fn run_host(client: Client, port: u16) -> Result<(), Box<dyn std::error::Err
                                 }
                             }
                         }
-                        println!("玩家 {:?} 的本地连接断开", steam_id_clone);
+                        println!("玩家 {:?} 的本地连接断开，正在关闭 Steam P2P 会话", steam_id_clone);
+                        client_clone.networking().close_p2p_session(steam_id_clone);
                     });
 
                     client_streams.insert(steam_id, stream);
+                    println!("当前活跃玩家: {}", client_streams.len());
                 }
 
                 if let Some(stream) = client_streams.get_mut(&steam_id) {
@@ -90,7 +93,9 @@ pub fn run_host(client: Client, port: u16) -> Result<(), Box<dyn std::error::Err
                             "写入 MC 失败，断开玩家 {:?}，原因: {:?}",
                             steam_id, e
                         );
+                        client.networking().close_p2p_session(steam_id);
                         client_streams.remove(&steam_id);
+                        println!("当前活跃玩家: {}", client_streams.len());
                     }
                 }
             }

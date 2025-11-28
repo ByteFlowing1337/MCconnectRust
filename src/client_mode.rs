@@ -1,6 +1,6 @@
 use crate::config::CLIENT_LISTEN_PORT;
 use crate::util::send_reliable_with_retry;
-use std::io::{Read, Write};
+use std::io::{ErrorKind, Read, Write};
 use std::net::TcpListener;
 use std::sync::mpsc;
 use std::thread;
@@ -55,41 +55,47 @@ pub fn run_client(client: Client, lobby_id: LobbyId) -> Result<(), Box<dyn std::
         }
 
         if local_stream.is_none() {
-            if let Ok((stream, addr)) = listener.accept() {
-                println!("MC 客户端已连接: {}", addr);
-                let _ = stream.set_nodelay(true);
+            match listener.accept() {
+                Ok((stream, addr)) => {
+                    println!("MC 客户端已连接: {}", addr);
+                    let _ = stream.set_nodelay(true);
 
-                let mut read_stream = stream.try_clone()?;
-                let client_clone = client.clone();
-                let target_host = host_id;
-                let tx = disconnect_tx.clone();
+                    let mut read_stream = stream.try_clone()?;
+                    let client_clone = client.clone();
+                    let target_host = host_id;
+                    let tx = disconnect_tx.clone();
 
-                thread::spawn(move || {
-                    let mut buffer = [0u8; 4096];
-                    loop {
-                        match read_stream.read(&mut buffer) {
-                            Ok(n) if n > 0 => {
-                                if !send_reliable_with_retry(&client_clone, target_host, &buffer[..n]) {
-                                    println!("警告: 客机向房主发送数据失败，可能正在重试");
+                    thread::spawn(move || {
+                        let mut buffer = [0u8; 4096];
+                        loop {
+                            match read_stream.read(&mut buffer) {
+                                Ok(n) if n > 0 => {
+                                    if !send_reliable_with_retry(&client_clone, target_host, &buffer[..n]) {
+                                        println!("警告: 客机向房主发送数据失败，可能正在重试");
+                                    }
+                                }
+                                Ok(_) => break,
+                                Err(e) => {
+                                    println!("读取本地 MC 失败: {:?}", e);
+                                    break;
                                 }
                             }
-                            Ok(_) => break,
-                            Err(e) => {
-                                println!("读取本地 MC 失败: {:?}", e);
-                                break;
-                            }
                         }
+                        println!("本地 MC 断开连接");
+                        let _ = tx.send(());
+                    });
+
+                    // 发送空包触发握手
+                    if !send_reliable_with_retry(&client, host_id, &[0]) {
+                        println!("警告: 无法向房主发送握手包，请稍后重试");
                     }
-                    println!("本地 MC 断开连接");
-                    let _ = tx.send(());
-                });
 
-                // 发送空包触发握手
-                if !send_reliable_with_retry(&client, host_id, &[0]) {
-                    println!("警告: 无法向房主发送握手包，请稍后重试");
+                    local_stream = Some(stream);
                 }
-
-                local_stream = Some(stream);
+                Err(ref e) if e.kind() == ErrorKind::WouldBlock => {}
+                Err(e) => {
+                    println!("等待 MC 连接时发生错误: {:?}", e);
+                }
             }
         }
 
@@ -97,18 +103,23 @@ pub fn run_client(client: Client, lobby_id: LobbyId) -> Result<(), Box<dyn std::
             let mut buf = vec![0; size];
             if let Some((steam_id, len)) = client.networking().read_p2p_packet(&mut buf) {
                 if len == 0 {
+                    println!("收到来自 {:?} 的 keep-alive 包", steam_id);
                     continue;
                 }
 
                 if steam_id != host_id {
+                    println!("忽略来自 {:?} 的数据 (期望 {:?})", steam_id, host_id);
                     continue;
                 }
 
                 if let Some(ref mut stream) = local_stream {
                     if let Err(e) = stream.write_all(&buf[..len]) {
-                        println!("写入本地 MC 失败: {}", e);
+                        println!("写入本地 MC 失败: {:?}", e);
                         local_stream = None;
+                        println!("Steam 数据 {} bytes 被丢弃，等待 MC 重新连接", len);
                     }
+                } else {
+                    println!("收到 Steam 数据 {} bytes 但 MC 未连接", len);
                 }
             }
         }
