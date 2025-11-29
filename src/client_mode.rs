@@ -41,12 +41,24 @@ pub fn run_client(client: Client, lobby_id: LobbyId) -> Result<(), Box<dyn std::
 
     println!("等待房主分配 IP...");
 
+    // Ensure we accept packets from the host
+    client.networking().accept_p2p_session(host_id);
+
     // Send HELLO to trigger Host's peer detection
     client.networking().send_p2p_packet(host_id, SendType::Reliable, b"HELLO");
+    let mut last_hello = Instant::now();
 
     // Wait for IP assignment
     let assigned_ip = loop {
         client.run_callbacks();
+
+        // Retry HELLO every 1 second
+        if last_hello.elapsed() > Duration::from_secs(1) {
+            println!("正在尝试连接房主...");
+            client.networking().send_p2p_packet(host_id, SendType::Reliable, b"HELLO");
+            last_hello = Instant::now();
+        }
+
         if let Some(size) = client.networking().is_p2p_packet_available() {
             let mut buf = vec![0; size];
             if let Some((steam_id, len)) = client.networking().read_p2p_packet(&mut buf) {
