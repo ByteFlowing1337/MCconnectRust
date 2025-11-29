@@ -1,6 +1,4 @@
-// 网络端口配置
-pub const MC_SERVER_PORT: u16 = 25565;
-pub const CLIENT_LISTEN_PORT: u16 = 55555;
+
 
 // 性能优化配置
 pub const BUFFER_SIZE: usize = 65536;           // 64KB 读取缓冲区
