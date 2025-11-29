@@ -1,6 +1,5 @@
 use crate::callbacks::CallbackRegistry;
 use crate::client_mode::run_client;
-use crate::config::MC_SERVER_PORT;
 use crate::host::run_host;
 use steamworks::{Client, LobbyId};
 use std::io::{self, Write};
@@ -45,12 +44,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn run_host_mode(client: Client) -> Result<(), Box<dyn std::error::Error>> {
-    print!("\n  请输入本地 MC 服务器端口 (默认 25565) > ");
-    std::io::stdout().flush()?;
-    let mut port_str = String::new();
-    io::stdin().read_line(&mut port_str)?;
-    let port = port_str.trim().parse::<u16>().unwrap_or(MC_SERVER_PORT);
-    run_host(client, port)
+    println!("\n  正在启动虚拟局域网主机...");
+    // Port is no longer needed for VPN mode as we forward all traffic on the interface
+    run_host(client, 0)
 }
 
 fn run_client_mode(

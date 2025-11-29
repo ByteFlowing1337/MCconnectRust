@@ -1,0 +1,46 @@
+warning: constant `MC_SERVER_PORT` is never used
+ --> src\config.rs:2:11
+  |
+2 | pub const MC_SERVER_PORT: u16 = 25565;
+  |           ^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(dead_code)]` on by default
+
+warning: constant `CLIENT_LISTEN_PORT` is never used
+ --> src\config.rs:3:11
+  |
+3 | pub const CLIENT_LISTEN_PORT: u16 = 55555;
+  |           ^^^^^^^^^^^^^^^^^^
+
+warning: constant `BUFFER_SIZE` is never used
+ --> src\config.rs:6:11
+  |
+6 | pub const BUFFER_SIZE: usize = 65536;           // 64KB 读取缓冲区
+  |           ^^^^^^^^^^^
+
+warning: constant `SEND_QUEUE_SIZE` is never used
+ --> src\config.rs:7:11
+  |
+7 | pub const SEND_QUEUE_SIZE: usize = 1000;        // 发送队列容量
+  |           ^^^^^^^^^^^^^^^
+
+warning: constant `RETRY_ATTEMPTS` is never used
+ --> src\config.rs:8:11
+  |
+8 | pub const RETRY_ATTEMPTS: usize = 5;            // 重试次数
+  |           ^^^^^^^^^^^^^^
+
+warning: constant `RETRY_DELAY_MS` is never used
+ --> src\config.rs:9:11
+  |
+9 | pub const RETRY_DELAY_MS: u64 = 50;             // 重试延迟（毫秒）
+  |           ^^^^^^^^^^^^^^
+
+warning: function `record_packet_dropped` is never used
+  --> src\metrics.rs:34:8
+   |
+34 | pub fn record_packet_dropped() {
+   |        ^^^^^^^^^^^^^^^^^^^^^
+
+warning: `MCconnectRust` (bin "MCconnectRust") generated 7 warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.08s

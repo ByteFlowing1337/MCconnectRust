@@ -1,0 +1,73 @@
+    Checking MCconnectRust v0.1.0 (C:\coding\MCconnectRust)
+warning: unused imports: `Read` and `Write`
+ --> src\host.rs:4:15
+  |
+4 | use std::io::{Read, Write};
+  |               ^^^^  ^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
+
+warning: value assigned to `assigned_ip` is never read
+  --> src\client_mode.rs:45:13
+   |
+45 |     let mut assigned_ip = String::new();
+   |             ^^^^^^^^^^^
+   |
+   = help: maybe it is overwritten before being read?
+   = note: `#[warn(unused_assignments)]` on by default
+
+error[E0382]: borrow of moved value: `ip`
+   --> src\vpn.rs:108:67
+    |
+ 18 |         let ip = ip.to_string();
+    |             -- move occurs because `ip` has type `std::string::String`, which does not implement the `Copy` trait
+...
+ 21 |         thread::spawn(move || {
+    |                       ------- value moved into closure here
+...
+ 35 |                     .address(&ip)
+    |                               -- variable moved due to use in closure
+...
+108 |                 println!("VPN Interface created: IP={}, Mask={}", ip, netmask);
+    |                                                                   ^^ value borrowed here after move
+    |
+    = note: this error originates in the macro `$crate::format_args_nl` which comes from the expansion of the macro `println` (in Nightly builds, run with -Z macro-backtrace for more info)
+help: consider cloning the value before moving it into the closure
+    |
+ 21 ~         let value = ip.clone();
+ 22 ~         thread::spawn(move || {
+ 23 |             let rt = match tokio::runtime::Builder::new_current_thread()
+...
+ 35 |                 config
+ 36 ~                     .address(&value)
+    |
+
+error[E0382]: borrow of moved value: `netmask`
+   --> src\vpn.rs:108:71
+    |
+ 19 |         let netmask = netmask.to_string();
+    |             ------- move occurs because `netmask` has type `std::string::String`, which does not implement the `Copy` trait
+ 20 |
+ 21 |         thread::spawn(move || {
+    |                       ------- value moved into closure here
+...
+ 36 |                     .netmask(&netmask)
+    |                               ------- variable moved due to use in closure
+...
+108 |                 println!("VPN Interface created: IP={}, Mask={}", ip, netmask);
+    |                                                                       ^^^^^^^ value borrowed here after move
+    |
+    = note: this error originates in the macro `$crate::format_args_nl` which comes from the expansion of the macro `println` (in Nightly builds, run with -Z macro-backtrace for more info)
+help: consider cloning the value before moving it into the closure
+    |
+ 21 ~         let value = netmask.clone();
+ 22 ~         thread::spawn(move || {
+ 23 |             let rt = match tokio::runtime::Builder::new_current_thread()
+...
+ 36 |                     .address(&ip)
+ 37 ~                     .netmask(&value)
+    |
+
+For more information about this error, try `rustc --explain E0382`.
+warning: `MCconnectRust` (bin "MCconnectRust") generated 2 warnings
+error: could not compile `MCconnectRust` (bin "MCconnectRust") due to 2 previous errors; 2 warnings emitted
