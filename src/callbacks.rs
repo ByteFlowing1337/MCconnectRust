@@ -1,12 +1,10 @@
 use std::sync::{Arc, Mutex};
 use steamworks::networking_types::NetConnectionStatusChanged;
-use steamworks::{CallbackHandle, Client, GameLobbyJoinRequested, LobbyId, P2PSessionConnectFail, P2PSessionRequest};
+use steamworks::{CallbackHandle, Client, GameLobbyJoinRequested, LobbyId};
 
 pub struct CallbackRegistry {
     pub join_lobby_id: Arc<Mutex<Option<LobbyId>>>,
     _join_handle: CallbackHandle,
-    _p2p_handle: CallbackHandle,
-    _p2p_fail_handle: CallbackHandle,
     _net_status_handle: CallbackHandle,
 }
 
@@ -24,24 +22,8 @@ impl CallbackRegistry {
             *join_lobby_clone.lock().unwrap() = Some(val.lobby_steam_id);
         });
 
-        let client_p2p = client.clone();
-        let p2p_handle = client.register_callback(move |req: P2PSessionRequest| {
-            println!("┌─────────────────────────────────────");
-            println!("│ 收到 P2P 连接请求");
-            println!("│ 来自: {:?}", req.remote);
-            println!("│ 状态: 已自动接受");
-            println!("└─────────────────────────────────────");
-            client_p2p.networking().accept_p2p_session(req.remote);
-        });
-
-        let p2p_fail_handle = client.register_callback(|fail: P2PSessionConnectFail| {
-            println!("┌─────────────────────────────────────");
-            println!("│ ✗ P2P 连接失败");
-            println!("│ 对方: {:?}", fail.remote);
-            println!("│ 错误码: {} ({})", fail.error, describe_p2p_error(fail.error));
-            println!("│ 提示: 检查对方是否在线且运行相同应用");
-            println!("└─────────────────────────────────────");
-        });
+        // NOTE: Legacy P2P callbacks (P2PSessionRequest, P2PSessionConnectFail) removed.
+        // We now use NetworkingSockets API exclusively.
 
         let net_status_handle = client.register_callback(move |event: NetConnectionStatusChanged| {
             let current_state = event.connection_info.state();
@@ -69,20 +51,7 @@ impl CallbackRegistry {
         Self {
             join_lobby_id,
             _join_handle: join_handle,
-            _p2p_handle: p2p_handle,
-            _p2p_fail_handle: p2p_fail_handle,
             _net_status_handle: net_status_handle,
         }
-    }
-}
-
-fn describe_p2p_error(code: u8) -> &'static str {
-    match code {
-        0 => "None",
-        1 => "Remote 未运行该应用",
-        2 => "无权访问该应用",
-        3 => "Remote 未登录 Steam",
-        4 => "连接超时",
-        _ => "未知错误",
     }
 }

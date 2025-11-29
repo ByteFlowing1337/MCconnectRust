@@ -75,17 +75,22 @@ pub fn run_host(client: Client, _port: u16) -> Result<(), Box<dyn std::error::Er
     let session_metrics = metrics::SessionMetrics::new();
     let mut last_report_time = Instant::now();
 
+    println!("🔄 开始主循环，监听 NetworkingSockets 事件...");
+    
     while RUNNING.load(Ordering::Relaxed) {
         client.run_callbacks();
 
         // Handle listen socket events first so connections are ready before data flows
         while let Some(event) = listen_socket.try_receive_event() {
+            println!("📥 收到 ListenSocket 事件");
             match event {
                 ListenSocketEvent::Connecting(request) => {
                     let remote = request.remote();
-                    println!("🔔 收到连接请求: {}", remote.debug_string());
+                    println!("🔔 收到 NetworkingSockets 连接请求: {}", remote.debug_string());
                     if let Err(err) = request.accept() {
                         println!("✗ 无法接受连接: {err:?}");
+                    } else {
+                        println!("✓ 连接请求已接受，等待 Connected 事件...");
                     }
                 }
                 ListenSocketEvent::Connected(connected) => {
