@@ -1,5 +1,4 @@
-mod app;
-mod callbacks;
+
 mod app;
 mod callbacks;
 mod client_mode;
@@ -8,7 +7,7 @@ mod host;
 mod metrics;
 mod vpn;
 
-use std::io::{self, Write};
+use std::io::{self};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Err(e) = app::run() {
