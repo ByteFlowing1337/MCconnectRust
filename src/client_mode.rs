@@ -77,29 +77,39 @@ pub fn run_client(client: Client, lobby_id: LobbyId) -> Result<(), Box<dyn std::
     loop {
         client.run_callbacks();
 
-        // 1. Process TUN packets -> Send to Host
-        // We read from vpn.rx (non-blocking)
+        // 1. Process TUN packets -> Send to Host (Batch processing)
+        let mut packet_count = 0;
         while let Ok(packet) = vpn.rx.try_recv() {
             let len = packet.len();
             client.networking().send_p2p_packet(host_id, SendType::Unreliable, &packet);
             metrics::record_packet_sent(len as u64);
+            packet_count += 1;
+            if packet_count >= 100 { break; } // Prevent starvation
         }
 
-        // 2. Process Steam P2P packets -> Write to TUN
+        // 2. Process Steam P2P packets -> Write to TUN (Batch processing)
+        let mut packet_count = 0;
         while let Some(size) = client.networking().is_p2p_packet_available() {
             let mut buf = vec![0; size];
             if let Some((steam_id, len)) = client.networking().read_p2p_packet(&mut buf) {
-                if steam_id != host_id { continue; } // Ignore others for now
-
+                if steam_id != host_id { 
+                    packet_count += 1;
+                    if packet_count >= 100 { break; }
+                    continue; 
+                }
+                
                 if len > 0 {
                     // Write to TUN via channel
                     let packet = buf[..len].to_vec();
                     if let Err(e) = vpn.tx.send(packet) {
                         println!("Error sending to TUN: {:?}", e);
+                        metrics::record_packet_dropped();
                     }
                     metrics::record_packet_received(len as u64);
                 }
             }
+            packet_count += 1;
+            if packet_count >= 100 { break; }
         }
 
         // Periodic reporting
@@ -108,6 +118,6 @@ pub fn run_client(client: Client, lobby_id: LobbyId) -> Result<(), Box<dyn std::
             last_report_time = Instant::now();
         }
 
-        thread::sleep(Duration::from_millis(1));
+        thread::sleep(Duration::from_micros(100)); // 100μs for higher throughput
     }
 }

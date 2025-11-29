@@ -1,18 +1,23 @@
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tun::Configuration;
 
+// Performance tuning for large-scale packet handling
+const TUN_READ_BUFFER_SIZE: usize = 65536;      // 64KB for mod burst traffic
+const ASYNC_CHANNEL_CAPACITY: usize = 2000;     // 2K packets async queue
+const SYNC_CHANNEL_CAPACITY: usize = 2000;      // 2K packets sync queue
+
 pub struct VpnDevice {
     // We expose sync channels for the main application to use.
-    pub tx: Sender<Vec<u8>>,      // Send packet TO TUN (from Steam)
+    pub tx: std::sync::mpsc::SyncSender<Vec<u8>>,      // Send packet TO TUN (from Steam)
     pub rx: Receiver<Vec<u8>>,    // Receive packet FROM TUN (to Steam)
 }
 
 impl VpnDevice {
     pub fn new(ip: &str, netmask: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        let (tun_out_tx, tun_out_rx) = mpsc::channel(); // TUN -> App
-        let (app_in_tx, app_in_rx) = mpsc::channel();   // App -> TUN
+        let (tun_out_tx, tun_out_rx) = mpsc::sync_channel(SYNC_CHANNEL_CAPACITY); // TUN -> App
+        let (app_in_tx, app_in_rx) = mpsc::sync_channel(SYNC_CHANNEL_CAPACITY);   // App -> TUN
         let (init_tx, init_rx) = mpsc::channel();       // Init signal
 
         let ip = ip.to_string();
@@ -63,7 +68,7 @@ impl VpnDevice {
 
                 // Task: Read from TUN -> Send to App
                 tokio::spawn(async move {
-                    let mut buf = [0u8; 4096];
+                    let mut buf = vec![0u8; TUN_READ_BUFFER_SIZE]; // 64KB buffer for burst traffic
                     loop {
                         match reader.read(&mut buf).await {
                             Ok(n) if n > 0 => {
@@ -82,7 +87,7 @@ impl VpnDevice {
                 });
 
                 // Bridge: App (Sync) -> TUN (Async)
-                let (async_tx, mut async_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(100);
+                let (async_tx, mut async_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(ASYNC_CHANNEL_CAPACITY);
 
                 // Spawn a blocking task to read from the Sync Receiver
                 tokio::task::spawn_blocking(move || {

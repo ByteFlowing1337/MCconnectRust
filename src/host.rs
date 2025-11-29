@@ -48,8 +48,8 @@ pub fn run_host(client: Client, _port: u16) -> Result<(), Box<dyn std::error::Er
     while RUNNING.load(Ordering::Relaxed) {
         client.run_callbacks();
 
-        // 1. Process TUN packets -> Send to Peers
-        // We read from vpn.rx (non-blocking try_recv)
+        // 1. Process TUN packets -> Send to Peers (Batch processing)
+        let mut packet_count = 0;
         while let Ok(packet) = vpn.rx.try_recv() {
              let len = packet.len();
              // Basic routing logic
@@ -58,13 +58,20 @@ pub fn run_host(client: Client, _port: u16) -> Result<(), Box<dyn std::error::Er
                  client.networking().send_p2p_packet(*peer_id, SendType::Unreliable, &packet);
                  metrics::record_packet_sent(len as u64);
              }
+             packet_count += 1;
+             if packet_count >= 100 { break; } // Prevent starvation
         }
 
-        // 2. Process Steam P2P packets -> Write to TUN
+        // 2. Process Steam P2P packets -> Write to TUN (Batch processing)
+        let mut packet_count = 0;
         while let Some(size) = client.networking().is_p2p_packet_available() {
             let mut buf = vec![0; size];
             if let Some((steam_id, len)) = client.networking().read_p2p_packet(&mut buf) {
-                if len == 0 { continue; }
+                if len == 0 { 
+                    packet_count += 1;
+                    if packet_count >= 100 { break; }
+                    continue; 
+                }
 
                 // Handle new peers
                 if !peers.contains_key(&steam_id) {
@@ -84,6 +91,8 @@ pub fn run_host(client: Client, _port: u16) -> Result<(), Box<dyn std::error::Er
                 if buf.len() > 0 {
                     // Ignore control packets (like "HELLO")
                     if buf.starts_with(b"HELLO") {
+                        packet_count += 1;
+                        if packet_count >= 100 { break; }
                         continue;
                     }
 
@@ -92,10 +101,13 @@ pub fn run_host(client: Client, _port: u16) -> Result<(), Box<dyn std::error::Er
                     let packet = buf[..len].to_vec();
                     if let Err(e) = vpn.tx.send(packet) {
                         println!("Error sending to TUN: {:?}", e);
+                        metrics::record_packet_dropped();
                     }
                     metrics::record_packet_received(len as u64);
                 }
             }
+            packet_count += 1;
+            if packet_count >= 100 { break; }
         }
 
         // Periodic reporting
@@ -104,7 +116,7 @@ pub fn run_host(client: Client, _port: u16) -> Result<(), Box<dyn std::error::Er
             last_report_time = Instant::now();
         }
 
-        thread::sleep(Duration::from_millis(1));
+        thread::sleep(Duration::from_micros(100)); // 100μs for higher throughput
     }
 
     Ok(())
