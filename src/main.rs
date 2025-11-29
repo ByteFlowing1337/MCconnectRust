@@ -1,11 +1,22 @@
 mod app;
 mod callbacks;
+mod app;
+mod callbacks;
 mod client_mode;
 mod config;
 mod host;
 mod metrics;
 mod vpn;
 
+use std::io::{self, Write};
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    app::run()
+    if let Err(e) = app::run() {
+        println!("\n❌ 发生错误: {}", e);
+        println!("\n按回车键退出...");
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+        return Err(e);
+    }
+    Ok(())
 }

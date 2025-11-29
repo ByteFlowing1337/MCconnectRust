@@ -82,6 +82,11 @@ pub fn run_host(client: Client, _port: u16) -> Result<(), Box<dyn std::error::Er
                 }
 
                 if buf.len() > 0 {
+                    // Ignore control packets (like "HELLO")
+                    if buf.starts_with(b"HELLO") {
+                        continue;
+                    }
+
                     // Write to TUN via channel
                     // We only send the actual data slice
                     let packet = buf[..len].to_vec();

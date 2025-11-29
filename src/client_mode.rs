@@ -41,6 +41,9 @@ pub fn run_client(client: Client, lobby_id: LobbyId) -> Result<(), Box<dyn std::
 
     println!("等待房主分配 IP...");
 
+    // Send HELLO to trigger Host's peer detection
+    client.networking().send_p2p_packet(host_id, SendType::Reliable, b"HELLO");
+
     // Wait for IP assignment
     let assigned_ip = loop {
         client.run_callbacks();
