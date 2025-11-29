@@ -12,6 +12,117 @@ pub struct VpnDevice {
     // We expose sync channels for the main application to use.
     pub tx: std::sync::mpsc::SyncSender<Vec<u8>>,      // Send packet TO TUN (from Steam)
     pub rx: Receiver<Vec<u8>>,    // Receive packet FROM TUN (to Steam)
+    #[allow(dead_code)] // Used in Drop for cleanup
+    ip: String,  // Store IP for route cleanup
+}
+
+#[cfg(target_os = "windows")]
+fn configure_routes(ip: &str) -> Result<(), Box<dyn std::error::Error>> {
+    use std::process::Command;
+    
+    println!("🔧 配置 VPN 路由...");
+    
+    // Add route for VPN subnet only (10.10.10.0/24)
+    // This ensures only VPN traffic goes through TUN, not all internet traffic
+    let output = Command::new("route")
+        .args(&["add", "10.10.10.0", "mask", "255.255.255.0", ip, "metric", "1"])
+        .output()?;
+    
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        // Ignore "already exists" error
+        if !stderr.contains("already exists") && !stderr.contains("已存在") {
+            return Err(format!("Failed to add route: {}", stderr).into());
+        }
+    }
+    
+    println!("✅ 已添加 10.10.10.0/24 路由到 TUN 设备");
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn configure_routes(ip: &str) -> Result<(), Box<dyn std::error::Error>> {
+    use std::process::Command;
+    
+    println!("🔧 配置 VPN 路由...");
+    
+    // Linux uses 'ip route' command
+    // Add route for VPN subnet only (10.10.10.0/24)
+    let output = Command::new("ip")
+        .args(&["route", "add", "10.10.10.0/24", "dev", "tun0"] )
+        .output()?;
+    
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        // Ignore "already exists" error
+        if !stderr.contains("File exists") {
+            return Err(format!("Failed to add route: {}", stderr).into());
+        }
+    }
+    
+    println!("✅ 已添加 10.10.10.0/24 路由到 TUN 设备");
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn configure_routes(ip: &str) -> Result<(), Box<dyn std::error::Error>> {
+    use std::process::Command;
+    
+    println!("🔧 配置 VPN 路由...");
+    
+    // macOS uses 'route' command with different syntax
+    let output = Command::new("route")
+        .args(&["-n", "add", "-net", "10.10.10.0/24", ip])
+        .output()?;
+    
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        // Ignore "already exists" error
+        if !stderr.contains("File exists") {
+            return Err(format!("Failed to add route: {}", stderr).into());
+        }
+    }
+    
+    println!("✅ 已添加 10.10.10.0/24 路由到 TUN 设备");
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn cleanup_routes() {
+    use std::process::Command;
+    
+    let _ = Command::new("route")
+        .args(&["delete", "10.10.10.0"])
+        .output();
+    println!("🧹 已清理 VPN 路由");
+}
+
+#[cfg(target_os = "linux")]
+fn cleanup_routes() {
+    use std::process::Command;
+    
+    let _ = Command::new("ip")
+        .args(&["route", "del", "10.10.10.0/24"])
+        .output();
+    println!("🧹 已清理 VPN 路由");
+}
+
+#[cfg(target_os = "macos")]
+fn cleanup_routes() {
+    use std::process::Command;
+    
+    let _ = Command::new("route")
+        .args(&["-n", "delete", "-net", "10.10.10.0/24"])
+        .output();
+    println!("🧹 已清理 VPN 路由");
+}
+
+impl Drop for VpnDevice {
+    fn drop(&mut self) {
+        // Cleanup routes on all supported platforms
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+        cleanup_routes();
+    }
 }
 
 impl VpnDevice {
@@ -44,7 +155,7 @@ impl VpnDevice {
                 config
                     .address(&ip)
                     .netmask(&netmask)
-                    .destination(&ip)
+                    .destination("10.10.10.0")  // Use VPN subnet base, not individual IP
                     .up();
 
                 #[cfg(target_os = "windows")]
@@ -59,6 +170,13 @@ impl VpnDevice {
                         return;
                     }
                 };
+                
+                // Configure routes to limit TUN to VPN subnet only (cross-platform)
+                #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+                if let Err(e) = configure_routes(&ip) {
+                    let _ = init_tx.send(Err(format!("Failed to configure routes: {}", e)));
+                    return;
+                }
                 
                 // Signal success
                 let _ = init_tx.send(Ok(()));
@@ -119,6 +237,7 @@ impl VpnDevice {
                 Ok(VpnDevice {
                     tx: app_in_tx,
                     rx: tun_out_rx,
+                    ip: ip.to_string(),
                 })
             }
             Ok(Err(e)) => Err(e.into()),

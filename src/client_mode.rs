@@ -153,20 +153,67 @@ pub fn run_client(client: Client, lobby_id: LobbyId) -> Result<(), Box<dyn std::
     // Performance metrics
     let session_metrics = metrics::SessionMetrics::new();
     let mut last_report_time = Instant::now();
+    let mut send_failures = 0u32;
+    const MAX_FAILURES: u32 = 50;
+    let mut last_connection_check = Instant::now();
 
     loop {
         client.run_callbacks();
+
+        // Check connection state periodically (every 100ms)
+        if last_connection_check.elapsed() > Duration::from_millis(100) {
+            if let Ok(info) = sockets.get_connection_info(&host_connection) {
+                if let Ok(state) = info.state() {
+                    match state {
+                        NetworkingConnectionState::Connected => {
+                            // Connection is healthy, reset failure counter
+                            if send_failures > 0 {
+                                send_failures = 0;
+                                println!("✅ 连接已恢复");
+                            }
+                        }
+                        NetworkingConnectionState::ClosedByPeer
+                        | NetworkingConnectionState::ProblemDetectedLocally => {
+                            println!("⚠️ 连接已断开: {:?}", state);
+                            return Err("Steam P2P 连接中断".into());
+                        }
+                        NetworkingConnectionState::Connecting => {
+                            println!("🔄 正在重新连接...");
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            last_connection_check = Instant::now();
+        }
 
         // 1. Process TUN packets -> Send to Host (Batch processing)
         let mut packet_count = 0;
         while let Ok(packet) = vpn.rx.try_recv() {
             let len = packet.len();
-            if let Err(err) = host_connection.send_message(&packet, SendFlags::UNRELIABLE_NO_NAGLE)
-            {
-                println!("✗ VPN 数据发送失败: {err:?}");
+            
+            // Only send if we haven't hit max failures
+            if send_failures < MAX_FAILURES {
+                match host_connection.send_message(&packet, SendFlags::UNRELIABLE_NO_NAGLE) {
+                    Ok(_) => {
+                        metrics::record_packet_sent(len as u64);
+                        send_failures = 0; // Reset on success
+                    }
+                    Err(err) => {
+                        send_failures += 1;
+                        if send_failures == 1 || send_failures % 10 == 0 {
+                            println!("✗ VPN 数据发送失败 ({}/{}): {err:?}", send_failures, MAX_FAILURES);
+                        }
+                        if send_failures >= MAX_FAILURES {
+                            println!("❌ 连接失败次数过多，停止发送数据包");
+                        }
+                    }
+                }
             } else {
-                metrics::record_packet_sent(len as u64);
+                // Drop packets silently when connection is bad
+                metrics::record_packet_dropped();
             }
+            
             packet_count += 1;
             if packet_count >= 100 { break; } // Prevent starvation
         }

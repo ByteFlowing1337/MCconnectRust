@@ -149,13 +149,16 @@ pub fn run_host(client: Client, _port: u16) -> Result<(), Box<dyn std::error::Er
              // Basic routing logic
              // TODO: Real routing. For now, broadcast to all clients.
             for peer in peers.values() {
-                if let Err(err) = peer
-                    .connection
-                    .send_message(&packet, SendFlags::UNRELIABLE_NO_NAGLE)
-                {
-                    println!("✗ VPN 数据发送失败: {err:?}");
-                } else {
-                    metrics::record_packet_sent(len as u64);
+                match peer.connection.send_message(&packet, SendFlags::UNRELIABLE_NO_NAGLE) {
+                    Ok(_) => {
+                        metrics::record_packet_sent(len as u64);
+                    }
+                    Err(err) => {
+                        // Only log occasionally to avoid spam
+                        if packet_count % 10 == 0 {
+                            println!("✗ VPN 数据发送失败: {err:?}");
+                        }
+                    }
                 }
              }
              packet_count += 1;
