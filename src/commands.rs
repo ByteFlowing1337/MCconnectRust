@@ -25,6 +25,7 @@ pub struct PerformanceMetrics {
     recv_rate_mbps: f32,
     send_rate_pps: f32,
     recv_rate_pps: f32,
+    latency_ms: Option<u32>,
 }
 
 #[command]
@@ -73,6 +74,12 @@ pub fn get_performance_metrics() -> PerformanceMetrics {
     let send_rate_pps = snapshot.packets_sent as f32;
     let recv_rate_pps = snapshot.packets_received as f32;
 
+    // 获取延迟信息（如果有多个连接，返回第一个）
+    let latency_ms = metrics::get_all_latencies()
+        .values()
+        .next()
+        .copied();
+
     PerformanceMetrics {
         packets_sent: snapshot.packets_sent,
         packets_received: snapshot.packets_received,
@@ -83,18 +90,19 @@ pub fn get_performance_metrics() -> PerformanceMetrics {
         recv_rate_mbps,
         send_rate_pps,
         recv_rate_pps,
+        latency_ms,
     }
 }
 
 #[command]
-pub async fn start_host(port: u16) -> Result<(), String> {
+pub async fn start_host(port: u16, password: Option<String>) -> Result<(), String> {
     // Create channel to receive lobby ID
     let (tx, rx) = mpsc::channel();
     
     // This runs in a separate thread to avoid blocking the UI
     thread::spawn(move || {
         let client = Client::init().unwrap();
-        if let Err(e) = run_host(client, port, tx) {
+        if let Err(e) = run_host(client, port, password, tx) {
             eprintln!("Host error: {}", e);
         }
     });
@@ -108,7 +116,7 @@ pub async fn start_host(port: u16) -> Result<(), String> {
 }
 
 #[command]
-pub async fn join_lobby(lobby_id_str: String) -> Result<(), String> {
+pub async fn join_lobby(lobby_id_str: String, password: Option<String>) -> Result<(), String> {
     let lobby_id_u64 = lobby_id_str
         .parse::<u64>()
         .map_err(|_| "Invalid Lobby ID")?;
@@ -119,7 +127,7 @@ pub async fn join_lobby(lobby_id_str: String) -> Result<(), String> {
 
     thread::spawn(move || {
         let client = Client::init().unwrap();
-        if let Err(e) = run_client(client, lobby_id) {
+        if let Err(e) = run_client(client, lobby_id, password) {
             eprintln!("Client error: {}", e);
         }
     });

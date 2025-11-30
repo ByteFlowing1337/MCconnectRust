@@ -20,7 +20,7 @@ struct PeerState {
     to_mc_tx: Sender<Vec<u8>>,
 }
 
-pub fn run_host(client: Client, port: u16, lobby_id_tx: mpsc::Sender<u64>) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run_host(client: Client, port: u16, password: Option<String>, lobby_id_tx: mpsc::Sender<u64>) -> Result<(), Box<dyn std::error::Error>> {
     info!("🏗 正在创建 Steam 大厅...");
 
     // Create channel to receive lobby creation result
@@ -40,6 +40,14 @@ pub fn run_host(client: Client, port: u16, lobby_id_tx: mpsc::Sender<u64>) -> Re
                     info!("┌─────────────────────────────────────");
                     info!("│ ✓ 房间创建成功!");
                     info!("│ 房间 ID: {}", id.raw());
+                    
+                    // 设置房间密码（如果有）
+                    if let Some(ref pwd) = password {
+                        client.matchmaking().set_lobby_data(&id, "password", pwd);
+                        info!("│ 房间密码: {}", pwd);
+                    } else {
+                        info!("│ 房间无密码");
+                    }
                     info!("│ 好友可通过此 ID 加入游戏");
                     info!("└─────────────────────────────────────");
                     
@@ -174,9 +182,18 @@ pub fn run_host(client: Client, port: u16, lobby_id_tx: mpsc::Sender<u64>) -> Re
         }
 
         // Process Steam packets from peers -> Forward to MC server
+        // Also update latency information
+        let sockets = client.networking_sockets();
         let peers_to_remove: Vec<SteamId> = peers
             .iter_mut()
             .filter_map(|(steam_id, peer)| {
+                // 更新延迟信息
+                if let Ok(info) = sockets.get_connection_info(&peer.connection) {
+                    if let Ok(ping_ms) = info.ping() {
+                        metrics::update_latency(steam_id.raw(), ping_ms);
+                    }
+                }
+                
                 match peer.connection.receive_messages(64) {
                     Ok(messages) => {
                         for message in messages {
@@ -201,6 +218,7 @@ pub fn run_host(client: Client, port: u16, lobby_id_tx: mpsc::Sender<u64>) -> Re
 
         for steam_id in peers_to_remove {
             peers.remove(&steam_id);
+            metrics::clear_latency(steam_id.raw());
             info!("🔌 移除断开的玩家: {:?}", steam_id);
         }
 

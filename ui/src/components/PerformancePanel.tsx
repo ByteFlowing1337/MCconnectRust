@@ -11,6 +11,7 @@ interface PerformanceMetrics {
   recv_rate_mbps: number;
   send_rate_pps: number;
   recv_rate_pps: number;
+  latency_ms?: number | null;
 }
 
 interface PerformancePanelProps {
@@ -55,12 +56,21 @@ export const PerformancePanel: React.FC<PerformancePanelProps> = ({ metrics }) =
           </div>
           <span className="text-base font-semibold text-white/95">性能指标</span>
         </div>
-        {metrics.packets_dropped > 0 && (
-          <div className="flex items-center space-x-2 px-3 py-1.5 rounded-xl bg-yellow-500/20 border border-yellow-500/30">
-            <AlertTriangle size={14} className="text-yellow-400" />
-            <span className="text-xs font-medium text-yellow-300">丢包: {metrics.packets_dropped}</span>
-          </div>
-        )}
+        <div className="flex items-center space-x-2">
+          {metrics.latency_ms !== null && metrics.latency_ms !== undefined && (
+            <div className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-purple-500/20 border border-purple-500/30">
+              <span className="text-xs font-medium text-purple-300">
+                延迟: {metrics.latency_ms}ms
+              </span>
+            </div>
+          )}
+          {metrics.packets_dropped > 0 && (
+            <div className="flex items-center space-x-2 px-3 py-1.5 rounded-xl bg-yellow-500/20 border border-yellow-500/30">
+              <AlertTriangle size={14} className="text-yellow-400" />
+              <span className="text-xs font-medium text-yellow-300">丢包: {metrics.packets_dropped}</span>
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-4">

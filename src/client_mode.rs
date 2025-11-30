@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use steamworks::networking_types::{NetworkingConnectionState, NetworkingIdentity, SendFlags};
 use steamworks::{Client, LobbyId};
 
-pub fn run_client(client: Client, lobby_id: LobbyId) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run_client(client: Client, lobby_id: LobbyId, password: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
     info!("正在加入房间: {}", lobby_id.raw());
 
     let (tx, rx) = mpsc::channel();
@@ -33,6 +33,17 @@ pub fn run_client(client: Client, lobby_id: LobbyId) -> Result<(), Box<dyn std::
             }
         }
         thread::sleep(Duration::from_millis(50));
+    }
+
+    // 验证房间密码
+    let lobby_password = client.matchmaking().get_lobby_data(&lobby_id, "password");
+    if let Some(ref pwd) = password {
+        if lobby_password.as_deref() != Some(pwd.as_str()) {
+            return Err("房间密码错误".into());
+        }
+        info!("✓ 密码验证成功");
+    } else if !lobby_password.is_empty() {
+        return Err("房间需要密码，但未提供密码".into());
     }
 
     let host_id = client.matchmaking().lobby_owner(lobby_id);
@@ -86,9 +97,9 @@ pub fn run_client(client: Client, lobby_id: LobbyId) -> Result<(), Box<dyn std::
     );
 
     // 启动LAN发现广播
-    let broadcaster = LanBroadcaster::new(None, CLIENT_LISTEN_PORT)?;
+    let broadcaster = LanBroadcaster::new(Some("LAN world".to_string()), CLIENT_LISTEN_PORT)?;
     let _broadcast_handle = broadcaster.start();
-    info!("✓ Minecraft LAN发现广播已启动");
+    info!("✓ Minecraft LAN发现广播已启动 (服务器名称: LAN world)");
 
     info!("");
     info!("┌─────────────────────────────────────────────────────────┐");
@@ -167,6 +178,14 @@ pub fn run_client(client: Client, lobby_id: LobbyId) -> Result<(), Box<dyn std::
                 Err(e) => {
                     error!("等待 MC 连接时发生错误: {:?}", e);
                 }
+            }
+        }
+
+        // 更新延迟信息
+        if let Ok(info) = sockets.get_connection_info(&connection) {
+            if let Ok(ping_ms) = info.ping() {
+                let host_id = client.matchmaking().lobby_owner(lobby_id);
+                metrics::update_latency(host_id.raw(), ping_ms);
             }
         }
 

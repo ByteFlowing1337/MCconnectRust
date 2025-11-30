@@ -1,5 +1,6 @@
 use log::info;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicU32, Ordering};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 /// 全局性能指标
@@ -19,6 +20,9 @@ static METRICS: NetworkMetrics = NetworkMetrics {
     packets_dropped: AtomicU64::new(0),
 };
 
+/// 延迟信息存储 (SteamId -> ping_ms)
+static LATENCY: Mutex<std::collections::HashMap<u64, u32>> = Mutex::new(std::collections::HashMap::new());
+
 /// 记录发送的包
 pub fn record_packet_sent(bytes: u64) {
     METRICS.packets_sent.fetch_add(1, Ordering::Relaxed);
@@ -34,6 +38,38 @@ pub fn record_packet_received(bytes: u64) {
 /// 记录丢弃的包
 pub fn record_packet_dropped() {
     METRICS.packets_dropped.fetch_add(1, Ordering::Relaxed);
+}
+
+/// 更新延迟信息
+pub fn update_latency(steam_id: u64, ping_ms: u32) {
+    if let Ok(mut latency) = LATENCY.lock() {
+        latency.insert(steam_id, ping_ms);
+    }
+}
+
+/// 获取延迟信息
+pub fn get_latency(steam_id: u64) -> Option<u32> {
+    if let Ok(latency) = LATENCY.lock() {
+        latency.get(&steam_id).copied()
+    } else {
+        None
+    }
+}
+
+/// 获取所有延迟信息
+pub fn get_all_latencies() -> std::collections::HashMap<u64, u32> {
+    if let Ok(latency) = LATENCY.lock() {
+        latency.clone()
+    } else {
+        std::collections::HashMap::new()
+    }
+}
+
+/// 清除延迟信息
+pub fn clear_latency(steam_id: u64) {
+    if let Ok(mut latency) = LATENCY.lock() {
+        latency.remove(&steam_id);
+    }
 }
 
 /// 获取当前指标快照

@@ -140,13 +140,39 @@ jobs:
           for dir in */; do
             name="${dir%/}"
             if [[ "$name" == *"windows"* ]]; then
-              zip -r "../${name}.zip" "$dir"
+              # Windows: look for .msi or .exe files
+              if find "$dir" -name "*.msi" | grep -q .; then
+                find "$dir" -name "*.msi" -exec cp {} "../${name}.msi" \;
+              elif find "$dir" -name "*.exe" | grep -q .; then
+                find "$dir" -name "*.exe" -exec cp {} "../${name}-setup.exe" \;
+              else
+                zip -r "../${name}.zip" "$dir"
+              fi
+            elif [[ "$name" == *"macos"* ]]; then
+              # macOS: look for .dmg or .app files
+              if find "$dir" -name "*.dmg" | grep -q .; then
+                find "$dir" -name "*.dmg" -exec cp {} "../${name}.dmg" \;
+              elif find "$dir" -name "*.app" -type d | grep -q .; then
+                APP_DIR=$(find "$dir" -name "*.app" -type d | head -1)
+                tar -czvf "../${name}.app.tar.gz" -C "$(dirname "$APP_DIR")" "$(basename "$APP_DIR")"
+              else
+                tar -czvf "../${name}.tar.gz" "$dir"
+              fi
             else
-              tar -czvf "../${name}.tar.gz" "$dir"
+              # Linux: look for .deb, .AppImage, or .rpm
+              if find "$dir" -name "*.deb" | grep -q .; then
+                find "$dir" -name "*.deb" -exec cp {} "../${name}.deb" \;
+              elif find "$dir" -name "*.AppImage" | grep -q .; then
+                find "$dir" -name "*.AppImage" -exec cp {} "../${name}.AppImage" \;
+              elif find "$dir" -name "*.rpm" | grep -q .; then
+                find "$dir" -name "*.rpm" -exec cp {} "../${name}.rpm" \;
+              else
+                tar -czvf "../${name}.tar.gz" "$dir"
+              fi
             fi
           done
           cd ..
-          ls -la *.zip *.tar.gz
+          ls -la *.zip *.tar.gz *.msi *.exe *.dmg *.deb *.AppImage *.rpm 2>/dev/null || true
 
       - name: Create Git Tag
         run: |
@@ -168,10 +194,10 @@ jobs:
             **构建时间**: ${{ github.event.head_commit.timestamp }}
 
             ### 下载
-            - **Windows x64**: `MCconnectRust-windows-x64.zip`
-            - **Linux x64**: `MCconnectRust-linux-x64.tar.gz`
-            - **macOS Intel**: `MCconnectRust-macos-x64.tar.gz`
-            - **macOS Apple Silicon**: `MCconnectRust-macos-arm64.tar.gz`
+            - **Windows x64**: `MCconnectRust-windows-x64.msi` 或 `MCconnectRust-windows-x64-setup.exe`
+            - **Linux x64**: `MCconnectRust-linux-x64.deb` 或 `MCconnectRust-linux-x64.AppImage`
+            - **macOS Intel**: `MCconnectRust-macos-x64.dmg`
+            - **macOS Apple Silicon**: `MCconnectRust-macos-arm64.dmg`
 
             ### 使用说明
             1. 下载对应平台的压缩包
@@ -181,9 +207,9 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            MCconnectRust-windows-x64.zip
-            MCconnectRust-linux-x64.tar.gz
-            MCconnectRust-macos-x64.tar.gz
-            MCconnectRust-macos-arm64.tar.gz
+            MCconnectRust-windows-x64.*
+            MCconnectRust-linux-x64.*
+            MCconnectRust-macos-x64.*
+            MCconnectRust-macos-arm64.*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

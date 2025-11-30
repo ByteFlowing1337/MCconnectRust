@@ -26,7 +26,13 @@ impl LanBroadcaster {
         server_port: u16,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         // 创建UDP socket用于发送广播
+        // 绑定到任意可用端口
         let socket = UdpSocket::bind("0.0.0.0:0")?;
+        
+        // 设置socket允许广播
+        if let Err(e) = socket.set_broadcast(true) {
+            warn!("⚠ 设置广播模式失败: {:?}", e);
+        }
 
         Ok(LanBroadcaster {
             socket,
@@ -44,9 +50,20 @@ impl LanBroadcaster {
             self.server_name, self.server_port
         );
 
-        // 发送到本地回环地址，MC客户端会监听此端口
-        let target = format!("127.0.0.1:{}", LAN_DISCOVERY_PORT);
-        self.socket.send_to(message.as_bytes(), &target)?;
+        // Minecraft使用组播地址 224.0.2.60:4445 进行LAN发现
+        // 同时发送到本地回环地址以确保本地客户端能收到
+        let multicast_target = format!("224.0.2.60:{}", LAN_DISCOVERY_PORT);
+        let localhost_target = format!("127.0.0.1:{}", LAN_DISCOVERY_PORT);
+        
+        // 发送到组播地址
+        if let Err(e) = self.socket.send_to(message.as_bytes(), &multicast_target) {
+            warn!("发送组播LAN广播失败: {:?}", e);
+        }
+        
+        // 同时发送到本地回环地址（某些情况下需要）
+        if let Err(e) = self.socket.send_to(message.as_bytes(), &localhost_target) {
+            warn!("发送本地LAN广播失败: {:?}", e);
+        }
 
         Ok(())
     }

@@ -27,6 +27,7 @@ interface PerformanceMetrics {
   recv_rate_mbps: number;
   send_rate_pps: number;
   recv_rate_pps: number;
+  latency_ms?: number | null;
 }
 
 interface MinecraftServerInfo {
@@ -36,6 +37,7 @@ interface MinecraftServerInfo {
 
 export const Host: React.FC<HostProps> = ({ onBack, connectionState, onConnectionChange }) => {
   const [port, setPort] = useState('25565');
+  const [password, setPassword] = useState('');
   const [status, setStatus] = useState<'idle' | 'running' | 'error'>('idle');
   const [message, setMessage] = useState('正在自动检测 Minecraft 服务器...');
   const [lobbyId, setLobbyId] = useState<string | null>(null);
@@ -160,7 +162,10 @@ export const Host: React.FC<HostProps> = ({ onBack, connectionState, onConnectio
     setStatus('running');
     setMessage('正在启动主机...');
     try {
-      await invoke('start_host', { port: parseInt(port) });
+      await invoke('start_host', { 
+        port: parseInt(port),
+        password: password.trim() || null
+      });
       setMessage('主机运行中... 正在获取房间号...');
       
       // Wait a bit for lobby creation, then fetch lobby ID once
@@ -326,6 +331,34 @@ export const Host: React.FC<HostProps> = ({ onBack, connectionState, onConnectio
                 </div>
               )}
             </div>
+          </div>
+
+          {/* Password Input */}
+          <div>
+            <label className="block text-sm font-semibold text-white/70 mb-3 tracking-wide">
+              房间密码 <span className="text-xs text-white/40 font-normal">(可选)</span>
+            </label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="
+                w-full 
+                bg-white/5 backdrop-blur-xl
+                border border-white/20 
+                rounded-2xl px-5 py-4 
+                text-white text-lg font-medium
+                placeholder:text-white/30
+                focus:outline-none 
+                focus:ring-2 focus:ring-blue-500/50 
+                focus:border-blue-500/50
+                transition-all duration-200
+                disabled:opacity-50 disabled:cursor-not-allowed
+                shadow-lg shadow-black/10
+              "
+              placeholder="留空则不设置密码"
+              disabled={status === 'running'}
+            />
           </div>
 
           {/* Lobby ID Display */}

@@ -27,10 +27,12 @@ interface PerformanceMetrics {
   recv_rate_mbps: number;
   send_rate_pps: number;
   recv_rate_pps: number;
+  latency_ms?: number | null;
 }
 
 export const Client: React.FC<ClientProps> = ({ onBack, connectionState, onConnectionChange }) => {
   const [lobbyId, setLobbyId] = useState('');
+  const [password, setPassword] = useState('');
   const [status, setStatus] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle');
   const [message, setMessage] = useState('');
   const [metrics, setMetrics] = useState<PerformanceMetrics | null>(null);
@@ -68,7 +70,10 @@ export const Client: React.FC<ClientProps> = ({ onBack, connectionState, onConne
     setStatus('connecting');
     setMessage('正在加入房间...');
     try {
-      await invoke('join_lobby', { lobbyIdStr: lobbyId });
+      await invoke('join_lobby', { 
+        lobbyIdStr: lobbyId,
+        password: password.trim() || null
+      });
       setStatus('connected');
       setMessage(''); // 清空消息，使用专门的连接成功提示
       // 通知父组件连接状态变化
@@ -129,32 +134,61 @@ export const Client: React.FC<ClientProps> = ({ onBack, connectionState, onConne
         <div className="space-y-6">
           {/* Lobby ID Input */}
           {status !== 'connected' && (
-            <div>
-              <label className="block text-sm font-semibold text-white/70 mb-3 tracking-wide">
-                房间号 (Lobby ID)
-              </label>
-              <input
-                type="text"
-                value={lobbyId}
-                onChange={(e) => setLobbyId(e.target.value)}
-                className="
-                  w-full 
-                  bg-white/5 backdrop-blur-xl
-                  border border-white/20 
-                  rounded-2xl px-5 py-4 
-                  text-white text-lg font-medium
-                  placeholder:text-white/30
-                  focus:outline-none 
-                  focus:ring-2 focus:ring-purple-500/50 
-                  focus:border-purple-500/50
-                  transition-all duration-200
-                  disabled:opacity-50 disabled:cursor-not-allowed
-                  shadow-lg shadow-black/10
-                "
-                placeholder="输入好友分享的房间号"
-                disabled={status === 'connecting'}
-              />
-            </div>
+            <>
+              <div>
+                <label className="block text-sm font-semibold text-white/70 mb-3 tracking-wide">
+                  房间号 (Lobby ID)
+                </label>
+                <input
+                  type="text"
+                  value={lobbyId}
+                  onChange={(e) => setLobbyId(e.target.value)}
+                  className="
+                    w-full 
+                    bg-white/5 backdrop-blur-xl
+                    border border-white/20 
+                    rounded-2xl px-5 py-4 
+                    text-white text-lg font-medium
+                    placeholder:text-white/30
+                    focus:outline-none 
+                    focus:ring-2 focus:ring-purple-500/50 
+                    focus:border-purple-500/50
+                    transition-all duration-200
+                    disabled:opacity-50 disabled:cursor-not-allowed
+                    shadow-lg shadow-black/10
+                  "
+                  placeholder="输入好友分享的房间号"
+                  disabled={status === 'connecting'}
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-semibold text-white/70 mb-3 tracking-wide">
+                  房间密码 <span className="text-xs text-white/40 font-normal">(如有)</span>
+                </label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="
+                    w-full 
+                    bg-white/5 backdrop-blur-xl
+                    border border-white/20 
+                    rounded-2xl px-5 py-4 
+                    text-white text-lg font-medium
+                    placeholder:text-white/30
+                    focus:outline-none 
+                    focus:ring-2 focus:ring-purple-500/50 
+                    focus:border-purple-500/50
+                    transition-all duration-200
+                    disabled:opacity-50 disabled:cursor-not-allowed
+                    shadow-lg shadow-black/10
+                  "
+                  placeholder="如果房间有密码，请输入"
+                  disabled={status === 'connecting'}
+                />
+              </div>
+            </>
           )}
 
           {/* Connection Status Message */}
