@@ -6,6 +6,7 @@ mod host;
 mod metrics;
 mod send_queue;
 mod util;
+mod vpn;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     app::run()
