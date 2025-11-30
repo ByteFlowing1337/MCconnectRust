@@ -45,11 +45,22 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn run_host_mode(client: Client) -> Result<(), Box<dyn std::error::Error>> {
-    print!("\n  请输入本地 MC 服务器端口 (默认 25565) > ");
-    std::io::stdout().flush()?;
-    let mut port_str = String::new();
-    io::stdin().read_line(&mut port_str)?;
-    let port = port_str.trim().parse::<u16>().unwrap_or(MC_SERVER_PORT);
+    let port = loop {
+        print!("\n  请输入本地 MC 服务器端口 (默认 25565) > ");
+        std::io::stdout().flush()?;
+        let mut port_str = String::new();
+        io::stdin().read_line(&mut port_str)?;
+        let trimmed = port_str.trim();
+        if trimmed.is_empty() {
+            break MC_SERVER_PORT;
+        }
+        match trimmed.parse::<u16>() {
+            Ok(port) => break port,
+            Err(_) => {
+                println!("✗ 无效的端口号，请输入一个 1-65535 之间的数字。");
+            }
+        }
+    };
     run_host(client, port)
 }
 
@@ -65,22 +76,37 @@ fn run_client_mode(
     };
 
     if let Some(lobby_id) = target_lobby {
-        run_client(client, lobby_id)?;
+        if lobby_id.raw() == 0 {
+            println!("✗ 无效或空的大厅 ID。");
+        } else {
+            run_client(client, lobby_id)?;
+        }
     } else {
-        println!(" 无效的大厅 ID");
+        println!("未找到大厅。");
     }
 
     Ok(())
 }
 
 fn ask_lobby_id() -> Result<Option<LobbyId>, Box<dyn std::error::Error>> {
-    print!("\n 请输入对方的房间号 (Lobby ID) > ");
-    std::io::stdout().flush()?;
-    let mut id_str = String::new();
-    io::stdin().read_line(&mut id_str)?;
-    Ok(Some(LobbyId::from_raw(
-        id_str.trim().parse::<u64>().unwrap_or(0),
-    )))
+    let lobby_id = loop {
+        print!("\n 请输入对方的房间号 (Lobby ID) > ");
+        std::io::stdout().flush()?;
+        let mut id_str = String::new();
+        io::stdin().read_line(&mut id_str)?;
+        let trimmed = id_str.trim();
+        if trimmed.is_empty() {
+            println!("✗ 房间号不能为空。");
+            continue;
+        }
+        match trimmed.parse::<u64>() {
+            Ok(id) => break LobbyId::from_raw(id),
+            Err(_) => {
+                println!("✗ 无效的房间号，请输入一个纯数字 ID。");
+            }
+        }
+    };
+    Ok(Some(lobby_id))
 }
 
 fn wait_for_invite(client: &Client, callbacks: &CallbackRegistry) -> Option<LobbyId> {

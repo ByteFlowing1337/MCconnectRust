@@ -1,4 +1,4 @@
-use crate::config::{BUFFER_SIZE, MC_SERVER_PORT};
+use crate::config::BUFFER_SIZE;
 use crate::metrics;
 use std::collections::HashMap;
 use std::io::{ErrorKind, Read, Write};
@@ -20,7 +20,7 @@ struct PeerState {
     to_mc_tx: Sender<Vec<u8>>,
 }
 
-pub fn run_host(client: Client, _port: u16) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run_host(client: Client, port: u16) -> Result<(), Box<dyn std::error::Error>> {
     println!("🏗 正在创建 Steam 大厅...");
 
     // Create channel to receive lobby creation result
@@ -68,7 +68,7 @@ pub fn run_host(client: Client, _port: u16) -> Result<(), Box<dyn std::error::Er
     println!("┌─────────────────────────────────────────────────────────┐");
     println!("│  🎮 P2P 转发服务已启动                                  │");
     println!("├─────────────────────────────────────────────────────────┤");
-    println!("│  本地 MC 服务器: 127.0.0.1:{}                       │", MC_SERVER_PORT);
+    println!("│  本地 MC 服务器: 127.0.0.1:{}                       │", port);
     println!("│  确保你的 Minecraft 服务器正在运行!                     │");
     println!("└─────────────────────────────────────────────────────────┘");
     println!("");
@@ -108,7 +108,7 @@ pub fn run_host(client: Client, _port: u16) -> Result<(), Box<dyn std::error::Er
                         let from_mc_tx_clone = from_mc_tx.clone();
                         let steam_id_clone = steam_id;
                         thread::spawn(move || {
-                            if let Err(e) = bridge_to_mc_server(steam_id_clone, to_mc_rx, from_mc_tx_clone) {
+                            if let Err(e) = bridge_to_mc_server(steam_id_clone, port, to_mc_rx, from_mc_tx_clone) {
                                 println!("⚠️ MC 服务器连接断开 ({:?}): {}", steam_id_clone, e);
                             }
                         });
@@ -198,49 +198,53 @@ pub fn run_host(client: Client, _port: u16) -> Result<(), Box<dyn std::error::Er
 /// Bridge thread: connects to local MC server, forwards data bidirectionally
 fn bridge_to_mc_server(
     steam_id: SteamId,
+    port: u16,
     to_mc_rx: Receiver<Vec<u8>>,
     from_mc_tx: Sender<(SteamId, Vec<u8>)>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let addr = format!("127.0.0.1:{}", MC_SERVER_PORT);
+    let addr = format!("127.0.0.1:{}", port);
     println!("🔗 为 {:?} 连接 MC 服务器 {}...", steam_id, addr);
 
     let mut stream = TcpStream::connect(&addr)?;
-    stream.set_nonblocking(true)?;
     stream.set_nodelay(true)?;
-
     println!("✅ {:?} 已连接到 MC 服务器", steam_id);
 
-    let mut read_buf = [0u8; BUFFER_SIZE];
-
-    loop {
-        // Send data from Steam to MC server
-        while let Ok(data) = to_mc_rx.try_recv() {
-            if let Err(e) = stream.write_all(&data) {
-                println!("✗ 写入 MC 服务器失败: {:?}", e);
-                return Ok(());
-            }
-        }
-
-        // Read data from MC server
-        match stream.read(&mut read_buf) {
-            Ok(0) => {
-                println!("MC 服务器关闭连接 ({:?})", steam_id);
-                return Ok(());
-            }
-            Ok(n) => {
-                if from_mc_tx.send((steam_id, read_buf[..n].to_vec())).is_err() {
-                    return Ok(());
+    // Create a thread to read from the MC server and send to the main thread
+    let mut stream_clone = stream.try_clone()?;
+    let upstream_thread = thread::spawn(move || {
+        let mut read_buf = [0u8; BUFFER_SIZE];
+        loop {
+            match stream_clone.read(&mut read_buf) {
+                Ok(0) => {
+                    println!("MC 服务器关闭连接 ({:?})", steam_id);
+                    break; // Connection closed
+                }
+                Ok(n) => {
+                    if from_mc_tx.send((steam_id, read_buf[..n].to_vec())).is_err() {
+                        break; // Main thread disconnected
+                    }
+                }
+                Err(e) if e.kind() == ErrorKind::WouldBlock => {
+                     // This should not happen with blocking sockets
+                    thread::sleep(Duration::from_millis(10));
+                }
+                Err(e) => {
+                    println!("✗ 读取 MC 服务器失败: {:?}", e);
+                    break;
                 }
             }
-            Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
-                // No data available, continue
-            }
-            Err(e) => {
-                println!("✗ 读取 MC 服务器失败: {:?}", e);
-                return Ok(());
-            }
         }
+    });
 
-        thread::sleep(Duration::from_micros(100));
+    // Main bridge loop: receive from Steam and send to MC server
+    for data in to_mc_rx {
+        if stream.write_all(&data).is_err() {
+            break; // MC server connection closed
+        }
     }
+    
+    // The loop exits when to_mc_rx is disconnected (peer disconnected).
+    // The upstream_thread will exit automatically when from_mc_tx is dropped.
+    let _ = upstream_thread.join();
+    Ok(())
 }

@@ -39,7 +39,7 @@ pub fn run_client(client: Client, lobby_id: LobbyId) -> Result<(), Box<dyn std::
 
     if host_id == client.user().steam_id() {
         println!("!!! 错误: 无法连接自己，请使用两个不同的账号测试 !!!");
-        return Err("无法连接自己".into());
+    
     }
 
     // 使用新版 NetworkingSockets API 连接房主
