@@ -1,6 +1,7 @@
 use log::info;
-use std::sync::atomic::{AtomicU64, AtomicU32, Ordering};
-use std::sync::Mutex;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 /// 全局性能指标
@@ -21,7 +22,8 @@ static METRICS: NetworkMetrics = NetworkMetrics {
 };
 
 /// 延迟信息存储 (SteamId -> ping_ms)
-static LATENCY: Mutex<std::collections::HashMap<u64, u32>> = Mutex::new(std::collections::HashMap::new());
+static LATENCY: LazyLock<Mutex<HashMap<u64, u32>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// 记录发送的包
 pub fn record_packet_sent(bytes: u64) {
@@ -44,15 +46,6 @@ pub fn record_packet_dropped() {
 pub fn update_latency(steam_id: u64, ping_ms: u32) {
     if let Ok(mut latency) = LATENCY.lock() {
         latency.insert(steam_id, ping_ms);
-    }
-}
-
-/// 获取延迟信息
-pub fn get_latency(steam_id: u64) -> Option<u32> {
-    if let Ok(latency) = LATENCY.lock() {
-        latency.get(&steam_id).copied()
-    } else {
-        None
     }
 }
 

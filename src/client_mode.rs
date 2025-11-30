@@ -36,13 +36,13 @@ pub fn run_client(client: Client, lobby_id: LobbyId, password: Option<String>) -
     }
 
     // 验证房间密码
-    let lobby_password = client.matchmaking().get_lobby_data(&lobby_id, "password");
+    let lobby_password = client.matchmaking().lobby_data(lobby_id, "password");
     if let Some(ref pwd) = password {
         if lobby_password.as_deref() != Some(pwd.as_str()) {
             return Err("房间密码错误".into());
         }
         info!("✓ 密码验证成功");
-    } else if !lobby_password.is_empty() {
+    } else if lobby_password.is_some() {
         return Err("房间需要密码，但未提供密码".into());
     }
 
@@ -182,11 +182,10 @@ pub fn run_client(client: Client, lobby_id: LobbyId, password: Option<String>) -
         }
 
         // 更新延迟信息
-        if let Ok(info) = sockets.get_connection_info(&connection) {
-            if let Ok(ping_ms) = info.ping() {
-                let host_id = client.matchmaking().lobby_owner(lobby_id);
-                metrics::update_latency(host_id.raw(), ping_ms);
-            }
+        if let Ok((status, _)) = sockets.get_realtime_connection_status(&connection, 0) {
+            let ping_ms = status.ping() as u32;
+            let host_id = client.matchmaking().lobby_owner(lobby_id);
+            metrics::update_latency(host_id.raw(), ping_ms);
         }
 
         // 从 MC 读取数据 -> 发送到 Steam

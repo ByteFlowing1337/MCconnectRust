@@ -43,7 +43,7 @@ pub fn run_host(client: Client, port: u16, password: Option<String>, lobby_id_tx
                     
                     // 设置房间密码（如果有）
                     if let Some(ref pwd) = password {
-                        client.matchmaking().set_lobby_data(&id, "password", pwd);
+                        client.matchmaking().set_lobby_data(id, "password", pwd);
                         info!("│ 房间密码: {}", pwd);
                     } else {
                         info!("│ 房间无密码");
@@ -188,10 +188,8 @@ pub fn run_host(client: Client, port: u16, password: Option<String>, lobby_id_tx
             .iter_mut()
             .filter_map(|(steam_id, peer)| {
                 // 更新延迟信息
-                if let Ok(info) = sockets.get_connection_info(&peer.connection) {
-                    if let Ok(ping_ms) = info.ping() {
-                        metrics::update_latency(steam_id.raw(), ping_ms);
-                    }
+                if let Ok((status, _)) = sockets.get_realtime_connection_status(&peer.connection, 0) {
+                    metrics::update_latency(steam_id.raw(), status.ping() as u32);
                 }
                 
                 match peer.connection.receive_messages(64) {
