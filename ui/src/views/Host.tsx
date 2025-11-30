@@ -5,8 +5,16 @@ import { PerformancePanel } from '../components/PerformancePanel';
 import { ArrowLeft, Play, Loader2, Copy, Check, Radio, Sparkles } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 
+interface ConnectionState {
+  type: 'host' | 'client' | null;
+  lobbyId: string | null;
+  port: number | null;
+}
+
 interface HostProps {
   onBack: () => void;
+  connectionState?: ConnectionState;
+  onConnectionChange?: (lobbyId: string | null, port: number | null) => void;
 }
 
 interface PerformanceMetrics {
@@ -26,17 +34,66 @@ interface MinecraftServerInfo {
   motd: string;
 }
 
-export const Host: React.FC<HostProps> = ({ onBack }) => {
+export const Host: React.FC<HostProps> = ({ onBack, connectionState, onConnectionChange }) => {
   const [port, setPort] = useState('25565');
   const [status, setStatus] = useState<'idle' | 'running' | 'error'>('idle');
   const [message, setMessage] = useState('正在自动检测 Minecraft 服务器...');
   const [lobbyId, setLobbyId] = useState<string | null>(null);
+
+  // 检查是否有活跃的连接，恢复状态
+  useEffect(() => {
+    const restoreState = async () => {
+      try {
+        const id = await invoke<number | null>('get_lobby_id');
+        if (id) {
+          const idStr = id.toString();
+          setLobbyId(idStr);
+          setStatus('running');
+          setMessage('主机运行中... 请将房间号分享给好友');
+          setDetecting(false); // 停止检测
+          
+          // 从全局状态恢复端口号
+          if (connectionState?.port) {
+            setPort(connectionState.port.toString());
+          }
+          
+          // 通知父组件连接状态
+          if (onConnectionChange) {
+            onConnectionChange(idStr, connectionState?.port || null);
+          }
+        } else if (connectionState?.lobbyId && connectionState.type === 'host') {
+          // 如果后端没有连接但全局状态有，可能是状态不同步，尝试恢复UI
+          setLobbyId(connectionState.lobbyId);
+          setStatus('running');
+          setMessage('主机运行中... 请将房间号分享给好友');
+          setDetecting(false); // 停止检测
+          if (connectionState.port) {
+            setPort(connectionState.port.toString());
+          }
+        }
+      } catch (e) {
+        console.error('Failed to check connection:', e);
+      }
+    };
+    restoreState();
+  }, [connectionState, onConnectionChange]);
   const [copied, setCopied] = useState(false);
   const [metrics, setMetrics] = useState<PerformanceMetrics | null>(null);
   const [detecting, setDetecting] = useState(true);
   const [detectedServer, setDetectedServer] = useState<MinecraftServerInfo | null>(null);
   const [detectionAttempts, setDetectionAttempts] = useState(0);
   const detectionIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // 当状态恢复为running时，停止检测
+  useEffect(() => {
+    if (status === 'running') {
+      setDetecting(false);
+      if (detectionIntervalRef.current) {
+        clearInterval(detectionIntervalRef.current);
+        detectionIntervalRef.current = null;
+      }
+    }
+  }, [status]);
 
   // 自动轮询检测 Minecraft 服务器
   useEffect(() => {
@@ -111,8 +168,13 @@ export const Host: React.FC<HostProps> = ({ onBack }) => {
         try {
           const id = await invoke<number | null>('get_lobby_id');
           if (id) {
-            setLobbyId(id.toString());
+            const idStr = id.toString();
+            setLobbyId(idStr);
             setMessage('主机运行中... 请将房间号分享给好友');
+            // 通知父组件连接状态变化
+            if (onConnectionChange) {
+              onConnectionChange(idStr, parseInt(port));
+            }
           }
         } catch (e) {
           console.error('Failed to get lobby ID:', e);
@@ -136,14 +198,18 @@ export const Host: React.FC<HostProps> = ({ onBack }) => {
   useEffect(() => {
     if (status !== 'running') return;
     
-    const interval = setInterval(async () => {
+    // 立即获取一次性能指标
+    const fetchMetrics = async () => {
       try {
         const data = await invoke<PerformanceMetrics>('get_performance_metrics');
         setMetrics(data);
       } catch (e) {
         console.error('Failed to get metrics:', e);
       }
-    }, 2000);
+    };
+    fetchMetrics();
+    
+    const interval = setInterval(fetchMetrics, 2000);
 
     return () => clearInterval(interval);
   }, [status]);

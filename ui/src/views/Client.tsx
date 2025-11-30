@@ -5,8 +5,16 @@ import { PerformancePanel } from '../components/PerformancePanel';
 import { ArrowLeft, LogIn, Loader2, CheckCircle, Globe } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 
+interface ConnectionState {
+  type: 'host' | 'client' | null;
+  lobbyId: string | null;
+  port: number | null;
+}
+
 interface ClientProps {
   onBack: () => void;
+  connectionState?: ConnectionState;
+  onConnectionChange?: (lobbyId: string | null) => void;
 }
 
 interface PerformanceMetrics {
@@ -21,11 +29,39 @@ interface PerformanceMetrics {
   recv_rate_pps: number;
 }
 
-export const Client: React.FC<ClientProps> = ({ onBack }) => {
+export const Client: React.FC<ClientProps> = ({ onBack, connectionState, onConnectionChange }) => {
   const [lobbyId, setLobbyId] = useState('');
   const [status, setStatus] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle');
   const [message, setMessage] = useState('');
   const [metrics, setMetrics] = useState<PerformanceMetrics | null>(null);
+
+  // 检查是否有活跃的连接，恢复状态
+  useEffect(() => {
+    const restoreState = async () => {
+      try {
+        const id = await invoke<number | null>('get_lobby_id');
+        if (id) {
+          const idStr = id.toString();
+          setLobbyId(idStr);
+          setStatus('connected');
+          setMessage('');
+          
+          // 通知父组件连接状态
+          if (onConnectionChange) {
+            onConnectionChange(idStr);
+          }
+        } else if (connectionState?.lobbyId && connectionState.type === 'client') {
+          // 如果后端没有连接但全局状态有，可能是状态不同步，尝试恢复UI
+          setLobbyId(connectionState.lobbyId);
+          setStatus('connected');
+          setMessage('');
+        }
+      } catch (e) {
+        console.error('Failed to check connection:', e);
+      }
+    };
+    restoreState();
+  }, [connectionState, onConnectionChange]);
 
   const handleJoin = async () => {
     if (!lobbyId) return;
@@ -35,9 +71,16 @@ export const Client: React.FC<ClientProps> = ({ onBack }) => {
       await invoke('join_lobby', { lobbyIdStr: lobbyId });
       setStatus('connected');
       setMessage(''); // 清空消息，使用专门的连接成功提示
+      // 通知父组件连接状态变化
+      if (onConnectionChange) {
+        onConnectionChange(lobbyId);
+      }
     } catch (e) {
       setStatus('error');
       setMessage(`连接失败: ${e}`);
+      if (onConnectionChange) {
+        onConnectionChange(null);
+      }
     }
   };
 
@@ -45,14 +88,18 @@ export const Client: React.FC<ClientProps> = ({ onBack }) => {
   useEffect(() => {
     if (status !== 'connected') return;
     
-    const interval = setInterval(async () => {
+    // 立即获取一次性能指标
+    const fetchMetrics = async () => {
       try {
         const data = await invoke<PerformanceMetrics>('get_performance_metrics');
         setMetrics(data);
       } catch (e) {
         console.error('Failed to get metrics:', e);
       }
-    }, 2000);
+    };
+    fetchMetrics();
+    
+    const interval = setInterval(fetchMetrics, 2000);
 
     return () => clearInterval(interval);
   }, [status]);
