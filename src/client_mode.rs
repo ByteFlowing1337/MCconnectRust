@@ -1,19 +1,18 @@
 use crate::config::{BUFFER_SIZE, CLIENT_LISTEN_PORT};
 use crate::lan_discovery::LanBroadcaster;
 use crate::metrics;
-use crate::send_queue::SendQueue;
-use crate::util::send_reliable_with_retry;
 use std::io::{ErrorKind, Read, Write};
-use std::net::TcpListener;
-use std::sync::mpsc;
+use std::net::{TcpListener, TcpStream};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
+use steamworks::networking_types::{NetworkingConnectionState, NetworkingIdentity, SendFlags};
 use steamworks::{Client, LobbyId};
 
 pub fn run_client(client: Client, lobby_id: LobbyId) -> Result<(), Box<dyn std::error::Error>> {
     println!("正在加入房间: {}", lobby_id.raw());
 
-    let (tx, rx) = std::sync::mpsc::channel();
+    let (tx, rx) = mpsc::channel();
     client.matchmaking().join_lobby(lobby_id, move |result| {
         let _ = tx.send(result);
     });
@@ -40,9 +39,47 @@ pub fn run_client(client: Client, lobby_id: LobbyId) -> Result<(), Box<dyn std::
 
     if host_id == client.user().steam_id() {
         println!("!!! 错误: 无法连接自己，请使用两个不同的账号测试 !!!");
+        return Err("无法连接自己".into());
     }
 
+    // 使用新版 NetworkingSockets API 连接房主
+    println!("📡 正在建立 NetworkingSockets 连接...");
+    let sockets = client.networking_sockets();
+    let host_identity = NetworkingIdentity::new_steam_id(host_id);
+    
+    let mut connection = sockets
+        .connect_p2p(host_identity, 0, vec![])
+        .map_err(|_| "无法向房主发起连接，Steam NetworkingSockets 初始化失败")?;
+
+    // 等待连接建立
+    let connect_deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        client.run_callbacks();
+        if let Ok(info) = sockets.get_connection_info(&connection) {
+            if let Ok(state) = info.state() {
+                match state {
+                    NetworkingConnectionState::Connected => {
+                        println!("✅ NetworkingSockets 连接已建立");
+                        break;
+                    }
+                    NetworkingConnectionState::ClosedByPeer
+                    | NetworkingConnectionState::ProblemDetectedLocally => {
+                        return Err("房主拒绝或关闭了连接".into());
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        if Instant::now() > connect_deadline {
+            return Err("连接房主超时".into());
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+
+    // 启动本地监听
     let listener = TcpListener::bind(format!("0.0.0.0:{}", CLIENT_LISTEN_PORT))?;
+    listener.set_nonblocking(true)?;
     println!(">>> 请在 Minecraft 中连接: 127.0.0.1:{}", CLIENT_LISTEN_PORT);
 
     // 启动LAN发现广播
@@ -50,9 +87,20 @@ pub fn run_client(client: Client, lobby_id: LobbyId) -> Result<(), Box<dyn std::
     let _broadcast_handle = broadcaster.start();
     println!("✓ Minecraft LAN发现广播已启动");
 
-    let mut local_stream: Option<std::net::TcpStream> = None;
-    let (disconnect_tx, disconnect_rx) = mpsc::channel();
-    listener.set_nonblocking(true)?;
+    println!("");
+    println!("┌─────────────────────────────────────────────────────────┐");
+    println!("│  ✅ 已连接到房主!                                       │");
+    println!("├─────────────────────────────────────────────────────────┤");
+    println!("│  🎮 Minecraft 连接方式:                                 │");
+    println!("│     多人游戏 -> 添加服务器 -> 输入: 127.0.0.1:{}    │", CLIENT_LISTEN_PORT);
+    println!("└─────────────────────────────────────────────────────────┘");
+    println!("");
+
+    // Channel: MC读取线程 -> 主循环 (发送到Steam)
+    let (from_mc_tx, from_mc_rx): (Sender<Vec<u8>>, Receiver<Vec<u8>>) = mpsc::channel();
+    
+    let mut mc_stream: Option<TcpStream> = None;
+    let mut mc_read_thread_started = false;
 
     // 性能统计会话
     let session_metrics = metrics::SessionMetrics::new();
@@ -67,79 +115,47 @@ pub fn run_client(client: Client, lobby_id: LobbyId) -> Result<(), Box<dyn std::
             last_report_time = Instant::now();
         }
 
-        while disconnect_rx.try_recv().is_ok() {
-            println!("检测到本地 MC 连接断开，等待重新连接...");
-            local_stream = None;
-        }
-
-        if local_stream.is_none() {
+        // 检查是否有新的 MC 客户端连接
+        if mc_stream.is_none() {
             match listener.accept() {
                 Ok((stream, addr)) => {
-                    let connect_time = Instant::now();
                     println!("┌─────────────────────────────────────");
-                    println!("│ [连接] MC 客户端请求连接: {}", addr);
+                    println!("│ [连接] MC 客户端已连接: {}", addr);
                     println!("└─────────────────────────────────────");
                     
-                    // 设置为阻塞模式，避免 WouldBlock 错误
-                    let _ = stream.set_nonblocking(false);
-                    let _ = stream.set_nodelay(true);
-
-                    let mut read_stream = stream.try_clone()?;
-                    let client_clone = client.clone();
-                    let target_host = host_id;
-                    let tx = disconnect_tx.clone();
-
-                    // 创建异步发送队列
-                    let send_queue = SendQueue::new(client_clone.clone(), target_host);
-
-                    thread::spawn(move || {
-                        // 使用配置的大缓冲区
-                        let mut buffer = [0u8; BUFFER_SIZE];
-                        let mut total_sent = 0u64;
-                        let mut packet_count = 0u32;
-                        
-                        loop {
-                            match read_stream.read(&mut buffer) {
-                                Ok(n) if n > 0 => {
-                                    total_sent += n as u64;
-                                    packet_count += 1;
-                                    
-                                    // 记录发送指标
-                                    metrics::record_packet_sent(n as u64);
-
-                                    // 使用异步队列发送
-                                    if !send_queue.send(buffer[..n].to_vec()) {
-                                        println!("⚠ 警告: 发送队列满或断开，丢弃数据");
-                                        metrics::record_packet_dropped();
+                    stream.set_nodelay(true)?;
+                    
+                    // 启动 MC -> Steam 读取线程
+                    if !mc_read_thread_started {
+                        let mut read_stream = stream.try_clone()?;
+                        let from_mc_tx_clone = from_mc_tx.clone();
+                        thread::spawn(move || {
+                            let mut buffer = [0u8; BUFFER_SIZE];
+                            loop {
+                                match read_stream.read(&mut buffer) {
+                                    Ok(0) => {
+                                        println!("[读取线程] MC 客户端断开连接");
+                                        break;
+                                    }
+                                    Ok(n) => {
+                                        if from_mc_tx_clone.send(buffer[..n].to_vec()).is_err() {
+                                            break;
+                                        }
+                                    }
+                                    Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
+                                        thread::sleep(Duration::from_micros(100));
+                                    }
+                                    Err(e) => {
+                                        println!("✗ 读取 MC 失败: {:?}", e);
+                                        break;
                                     }
                                 }
-                                Ok(_) => break,
-                                Err(e) => {
-                                    println!("✗ 读取本地 MC 失败: {:?}", e);
-                                    break;
-                                }
                             }
-                        }
-                        
-                        let duration = connect_time.elapsed();
-                        let duration_secs = duration.as_secs_f32();
-                        
-                        println!("┌─────────────────────────────────────");
-                        println!("│ [断开] 本地 MC 连接已断开");
-                        println!("│ 持续时间: {:.2}秒", duration_secs);
-                        println!("│ 发送数据: {} 字节 ({} 包)", total_sent, packet_count);
-                        println!("│ 平均吞吐: {:.2} MB/s", total_sent as f32 / duration_secs / 1024.0 / 1024.0);
-                        println!("└─────────────────────────────────────");
-                        
-                        let _ = tx.send(());
-                    });
-
-                    // 发送空包触发握手 (仍使用同步发送以确保握手到达)
-                    if !send_reliable_with_retry(&client, host_id, &[0]) {
-                        println!("警告: 无法向房主发送握手包，请稍后重试");
+                        });
+                        mc_read_thread_started = true;
                     }
 
-                    local_stream = Some(stream);
+                    mc_stream = Some(stream);
                 }
                 Err(ref e) if e.kind() == ErrorKind::WouldBlock => {}
                 Err(e) => {
@@ -148,37 +164,43 @@ pub fn run_client(client: Client, lobby_id: LobbyId) -> Result<(), Box<dyn std::
             }
         }
 
-        while let Some(size) = client.networking().is_p2p_packet_available() {
-            let mut buf = vec![0; size];
-            if let Some((steam_id, len)) = client.networking().read_p2p_packet(&mut buf) {
-                if len == 0 {
-                    // println!("💓 收到来自 {:?} 的 keep-alive 包", steam_id);
-                    continue;
+        // 从 MC 读取数据 -> 发送到 Steam
+        while let Ok(data) = from_mc_rx.try_recv() {
+            match connection.send_message(&data, SendFlags::RELIABLE_NO_NAGLE) {
+                Ok(_) => {
+                    metrics::record_packet_sent(data.len() as u64);
                 }
-
-                if steam_id != host_id {
-                    println!("⚠ 忽略来自 {:?} 的数据 (期望 {:?})", steam_id, host_id);
-                    continue;
-                }
-
-                // 记录接收指标
-                metrics::record_packet_received(len as u64);
-
-                // 确保不越界
-                let actual_len = len.min(buf.len());
-                
-                if let Some(ref mut stream) = local_stream {
-                    if let Err(e) = stream.write_all(&buf[..actual_len]) {
-                        println!("✗ 写入本地 MC 失败: {:?}", e);
-                        local_stream = None;
-                        println!("⚠ Steam 数据 {} bytes 被丢弃，等待 MC 重新连接", actual_len);
-                    }
-                } else {
-                    println!("⚠ 收到 Steam 数据 {} bytes 但 MC 未连接 (缓冲中...)", actual_len);
+                Err(err) => {
+                    println!("✗ 发送到房主失败: {:?}", err);
+                    metrics::record_packet_dropped();
                 }
             }
         }
 
-        thread::sleep(Duration::from_millis(1));
+        // 从 Steam 接收数据 -> 写入 MC
+        match connection.receive_messages(64) {
+            Ok(messages) => {
+                for message in messages {
+                    let data = message.data();
+                    if data.is_empty() {
+                        continue;
+                    }
+                    metrics::record_packet_received(data.len() as u64);
+                    
+                    // 直接写入 MC stream
+                    if let Some(ref mut stream) = mc_stream {
+                        if let Err(e) = stream.write_all(data) {
+                            println!("✗ 写入 MC 失败: {:?}", e);
+                            mc_stream = None;
+                        }
+                    }
+                }
+            }
+            Err(err) => {
+                println!("⚠️ 从房主接收数据失败: {:?}", err);
+            }
+        }
+
+        thread::sleep(Duration::from_micros(100));
     }
 }

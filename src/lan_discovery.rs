@@ -93,16 +93,6 @@ pub struct BroadcastHandle {
     handle: Option<thread::JoinHandle<()>>,
 }
 
-impl BroadcastHandle {
-    /// 停止LAN广播
-    pub fn stop(mut self) {
-        self.running.store(false, Ordering::Relaxed);
-        if let Some(handle) = self.handle.take() {
-            let _ = handle.join();
-        }
-    }
-}
-
 impl Drop for BroadcastHandle {
     fn drop(&mut self) {
         self.running.store(false, Ordering::Relaxed);
