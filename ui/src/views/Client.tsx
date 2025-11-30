@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
+import { PerformancePanel } from '../components/PerformancePanel';
 import { ArrowLeft, LogIn, Loader2 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 
@@ -8,10 +9,23 @@ interface ClientProps {
   onBack: () => void;
 }
 
+interface PerformanceMetrics {
+  packets_sent: number;
+  packets_received: number;
+  bytes_sent: number;
+  bytes_received: number;
+  packets_dropped: number;
+  send_rate_mbps: number;
+  recv_rate_mbps: number;
+  send_rate_pps: number;
+  recv_rate_pps: number;
+}
+
 export const Client: React.FC<ClientProps> = ({ onBack }) => {
   const [lobbyId, setLobbyId] = useState('');
   const [status, setStatus] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle');
   const [message, setMessage] = useState('');
+  const [metrics, setMetrics] = useState<PerformanceMetrics | null>(null);
 
   const handleJoin = async () => {
     if (!lobbyId) return;
@@ -20,12 +34,28 @@ export const Client: React.FC<ClientProps> = ({ onBack }) => {
     try {
       await invoke('join_lobby', { lobbyIdStr: lobbyId });
       setStatus('connected');
-      setMessage('已连接! 请在 MC 中连接 127.0.0.1:25565');
+      setMessage('已连接! 请在 MC 中连接 127.0.0.1:55555');
     } catch (e) {
       setStatus('error');
       setMessage(`连接失败: ${e}`);
     }
   };
+
+  // Poll performance metrics every 2 seconds when connected
+  useEffect(() => {
+    if (status !== 'connected') return;
+    
+    const interval = setInterval(async () => {
+      try {
+        const data = await invoke<PerformanceMetrics>('get_performance_metrics');
+        setMetrics(data);
+      } catch (e) {
+        console.error('Failed to get metrics:', e);
+      }
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [status]);
 
   return (
     <div className="flex flex-col items-center justify-center h-full animate-fade-in">
@@ -52,6 +82,8 @@ export const Client: React.FC<ClientProps> = ({ onBack }) => {
           <div className="bg-black/20 rounded-lg p-4 min-h-[100px] text-sm text-white/80 font-mono">
             {message || '请输入房间号并点击加入...'}
           </div>
+
+          {status === 'connected' && <PerformancePanel metrics={metrics} />}
 
           <Button 
             onClick={handleJoin} 

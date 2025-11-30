@@ -20,7 +20,7 @@ struct PeerState {
     to_mc_tx: Sender<Vec<u8>>,
 }
 
-pub fn run_host(client: Client, port: u16) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run_host(client: Client, port: u16, lobby_id_tx: mpsc::Sender<u64>) -> Result<(), Box<dyn std::error::Error>> {
     info!("🏗 正在创建 Steam 大厅...");
 
     // Create channel to receive lobby creation result
@@ -42,6 +42,10 @@ pub fn run_host(client: Client, port: u16) -> Result<(), Box<dyn std::error::Err
                     info!("│ 房间 ID: {}", id.raw());
                     info!("│ 好友可通过此 ID 加入游戏");
                     info!("└─────────────────────────────────────");
+                    
+                    // Send lobby ID back to commands layer
+                    let _ = lobby_id_tx.send(id.raw());
+                    
                     break id;
                 }
                 Err(e) => {

@@ -6,6 +6,7 @@ use steamworks::{
     P2PSessionRequest,
 };
 
+#[allow(dead_code)]
 pub struct CallbackRegistry {
     pub join_lobby_id: Arc<Mutex<Option<LobbyId>>>,
     _join_handle: CallbackHandle,

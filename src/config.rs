@@ -1,4 +1,5 @@
 // 网络端口配置
+#[allow(dead_code)]
 pub const MC_SERVER_PORT: u16 = 25565;
 pub const CLIENT_LISTEN_PORT: u16 = 55555;
 
