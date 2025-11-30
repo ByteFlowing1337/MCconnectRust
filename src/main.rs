@@ -2,12 +2,12 @@
 mod app;
 mod callbacks;
 mod client_mode;
-
+mod config;
 mod host;
+mod lan_discovery;
 mod metrics;
-mod vpn;
 
-use std::io::{self};
+use std::io;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Err(e) = app::run() {

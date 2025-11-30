@@ -1,23 +1,23 @@
+use crate::config::{BUFFER_SIZE, MC_SERVER_PORT};
 use crate::metrics;
-use crate::vpn::VpnDevice;
 use std::collections::HashMap;
+use std::io::{ErrorKind, Read, Write};
+use std::net::TcpStream;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc;
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
 use steamworks::networking_sockets::NetConnection;
 use steamworks::networking_types::{ListenSocketEvent, SendFlags};
 use steamworks::{Client, LobbyType, SteamId};
 
-static RUNNING: AtomicBool = AtomicBool::new(true);
 
-// Virtual IP configuration
-const HOST_IP: &str = "10.10.10.1";
-const NETMASK: &str = "255.255.255.0";
+static RUNNING: AtomicBool = AtomicBool::new(true);
 
 struct PeerState {
     connection: NetConnection,
-    virtual_ip: String,
+    // Channel to send data to the MC server bridge thread
+    to_mc_tx: Sender<Vec<u8>>,
 }
 
 pub fn run_host(client: Client, _port: u16) -> Result<(), Box<dyn std::error::Error>> {
@@ -25,7 +25,6 @@ pub fn run_host(client: Client, _port: u16) -> Result<(), Box<dyn std::error::Er
 
     // Create channel to receive lobby creation result
     let (tx, rx) = mpsc::channel();
-    
     client.matchmaking().create_lobby(LobbyType::Public, 10, move |result| {
         let _ = tx.send(result);
     });
@@ -40,7 +39,6 @@ pub fn run_host(client: Client, _port: u16) -> Result<(), Box<dyn std::error::Er
                     println!("│ ✓ 房间创建成功!");
                     println!("│ 房间 ID: {}", id.raw());
                     println!("│ 好友可通过此 ID 加入游戏");
-                    println!("│ 虚拟 IP: {}", HOST_IP);
                     println!("└─────────────────────────────────────");
                     break id;
                 }
@@ -52,14 +50,8 @@ pub fn run_host(client: Client, _port: u16) -> Result<(), Box<dyn std::error::Er
         thread::sleep(Duration::from_millis(10));
     };
 
-    // NOW initialize TUN device (lobby is confirmed created)
-    println!("🔧 正在初始化 VPN 设备...");
-    let vpn = VpnDevice::new(HOST_IP, NETMASK)?;
-    // VpnDevice now handles reading/writing in a background thread via channels.
-    // vpn.rx: Packets FROM TUN -> We send to Steam
-    // vpn.tx: Packets TO TUN <- We get from Steam
 
-    // Peer management: SteamId -> NetConnection + Virtual IP
+    // Peer management: SteamId -> NetConnection
     let listen_socket = client
         .networking_sockets()
         .create_listen_socket_p2p(0, vec![])
@@ -67,16 +59,25 @@ pub fn run_host(client: Client, _port: u16) -> Result<(), Box<dyn std::error::Er
     println!("📡 NetworkingSockets 监听已启动 (虚拟端口 0)");
 
     let mut peers: HashMap<SteamId, PeerState> = HashMap::new();
-    let mut next_ip_octet = 2;
+    
+    // Channel to receive data from MC server threads: (steam_id, data)
+    let (from_mc_tx, from_mc_rx): (Sender<(SteamId, Vec<u8>)>, Receiver<(SteamId, Vec<u8>)>) =
+        mpsc::channel();
 
-    println!(" VPN 服务已启动，等待玩家加入...");
+    println!("");
+    println!("┌─────────────────────────────────────────────────────────┐");
+    println!("│  🎮 P2P 转发服务已启动                                  │");
+    println!("├─────────────────────────────────────────────────────────┤");
+    println!("│  本地 MC 服务器: 127.0.0.1:{}                       │", MC_SERVER_PORT);
+    println!("│  确保你的 Minecraft 服务器正在运行!                     │");
+    println!("└─────────────────────────────────────────────────────────┘");
+    println!("");
 
     // Performance metrics
     let session_metrics = metrics::SessionMetrics::new();
     let mut last_report_time = Instant::now();
 
     println!("🔄 开始主循环，监听 NetworkingSockets 事件...");
-    
     while RUNNING.load(Ordering::Relaxed) {
         client.run_callbacks();
 
@@ -96,40 +97,34 @@ pub fn run_host(client: Client, _port: u16) -> Result<(), Box<dyn std::error::Er
                 ListenSocketEvent::Connected(connected) => {
                     let remote = connected.remote();
                     if let Some(steam_id) = remote.steam_id() {
-                        if next_ip_octet >= 255 {
-                            println!("⚠️ 虚拟网段地址已耗尽，拒绝 {}", remote.debug_string());
-                            continue;
-                        }
-                        let peer_ip = format!("10.10.10.{}", next_ip_octet);
-                        next_ip_octet += 1;
-
                         let connection = connected.take_connection();
+                        
+                        // Create channel for sending data to MC server
+                        let (to_mc_tx, to_mc_rx): (Sender<Vec<u8>>, Receiver<Vec<u8>>) =
+                            mpsc::channel();
+                        
+                        // Spawn thread to bridge this peer to MC server
+                        let from_mc_tx_clone = from_mc_tx.clone();
+                        let steam_id_clone = steam_id;
+                        thread::spawn(move || {
+                            if let Err(e) = bridge_to_mc_server(steam_id_clone, to_mc_rx, from_mc_tx_clone) {
+                                println!("⚠️ MC 服务器连接断开 ({:?}): {}", steam_id_clone, e);
+                            }
+                        });
+                        
                         peers.insert(
                             steam_id,
-                            PeerState {
-                                connection,
-                                virtual_ip: peer_ip.clone(),
-                            },
+                            PeerState { connection, to_mc_tx },
                         );
 
                         println!("┌─────────────────────────────────────");
                         println!("│ [新玩家] Steam ID: {:?}", steam_id);
-                        println!("│ 分配 IP: {}", peer_ip);
+                        println!("│ 已建立连接并桥接到 MC 服务器");
                         println!("└─────────────────────────────────────");
-
-                        if let Some(peer) = peers.get(&steam_id) {
-                            let hello_msg = format!("IP:{}", peer.virtual_ip);
-                            if let Err(err) = peer.connection.send_message(
-                                hello_msg.as_bytes(),
-                                SendFlags::RELIABLE,
-                            ) {
-                                println!("✗ 发送 IP 分配信息失败: {err:?}");
-                            }
-                        }
                     } else {
                         println!(
                             "⚠️ 收到未知身份连接，无法映射 Steam ID: {}",
-                            remote.debug_string()
+                            connected.remote().debug_string()
                         );
                     }
                 }
@@ -142,61 +137,49 @@ pub fn run_host(client: Client, _port: u16) -> Result<(), Box<dyn std::error::Er
             }
         }
 
-        // 1. Process TUN packets -> Send to Peers (Batch processing)
-        let mut packet_count = 0;
-        while let Ok(packet) = vpn.rx.try_recv() {
-             let len = packet.len();
-             // Basic routing logic
-             // TODO: Real routing. For now, broadcast to all clients.
-            for peer in peers.values() {
-                match peer.connection.send_message(&packet, SendFlags::UNRELIABLE_NO_NAGLE) {
-                    Ok(_) => {
-                        metrics::record_packet_sent(len as u64);
-                    }
-                    Err(err) => {
-                        // Only log occasionally to avoid spam
-                        if packet_count % 10 == 0 {
-                            println!("✗ VPN 数据发送失败: {err:?}");
-                        }
-                    }
+
+
+        // Process data from MC server -> Send to peers via Steam
+        while let Ok((steam_id, data)) = from_mc_rx.try_recv() {
+            if let Some(peer) = peers.get(&steam_id) {
+                if let Err(err) = peer.connection.send_message(&data, SendFlags::RELIABLE_NO_NAGLE) {
+                    println!("✗ 发送数据到客户端失败: {err:?}");
+                    metrics::record_packet_dropped();
+                } else {
+                    metrics::record_packet_sent(data.len() as u64);
                 }
-             }
-             packet_count += 1;
-             if packet_count >= 100 { break; } // Prevent starvation
+            }
         }
 
-        // 2. Process Steam P2P packets -> Write to TUN (Batch processing)
-        let mut packet_count = 0;
-        for peer in peers.values_mut() {
-            match peer.connection.receive_messages(64) {
-                Ok(messages) => {
-                    for message in messages {
-                        let data = message.data();
-                        if data.is_empty() {
-                            continue;
-                        }
-                        if data.starts_with(b"HELLO") {
-                            continue;
-                        }
-                        if let Err(e) = vpn.tx.send(data.to_vec()) {
-                            println!("Error sending to TUN: {:?}", e);
-                            metrics::record_packet_dropped();
-                        } else {
+        // Process Steam packets from peers -> Forward to MC server
+        let peers_to_remove: Vec<SteamId> = peers
+            .iter_mut()
+            .filter_map(|(steam_id, peer)| {
+                match peer.connection.receive_messages(64) {
+                    Ok(messages) => {
+                        for message in messages {
+                            let data = message.data();
+                            if data.is_empty() {
+                                continue;
+                            }
                             metrics::record_packet_received(data.len() as u64);
-                        }
-                        packet_count += 1;
-                        if packet_count >= 100 {
-                            break;
+                            if peer.to_mc_tx.send(data.to_vec()).is_err() {
+                                // MC connection closed
+                                return Some(*steam_id);
+                            }
                         }
                     }
+                    Err(_) => {
+                        return Some(*steam_id);
+                    }
                 }
-                Err(err) => {
-                    println!("⚠️ 无法读取来自客户端的数据: {err:?}");
-                }
-            }
-            if packet_count >= 100 {
-                break;
-            }
+                None
+            })
+            .collect();
+
+        for steam_id in peers_to_remove {
+            peers.remove(&steam_id);
+            println!("🔌 移除断开的玩家: {:?}", steam_id);
         }
 
         // Periodic reporting
@@ -209,4 +192,54 @@ pub fn run_host(client: Client, _port: u16) -> Result<(), Box<dyn std::error::Er
     }
 
     Ok(())
+}
+
+/// Bridge thread: connects to local MC server, forwards data bidirectionally
+fn bridge_to_mc_server(
+    steam_id: SteamId,
+    to_mc_rx: Receiver<Vec<u8>>,
+    from_mc_tx: Sender<(SteamId, Vec<u8>)>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let addr = format!("127.0.0.1:{}", MC_SERVER_PORT);
+    println!("🔗 为 {:?} 连接 MC 服务器 {}...", steam_id, addr);
+
+    let mut stream = TcpStream::connect(&addr)?;
+    stream.set_nonblocking(true)?;
+    stream.set_nodelay(true)?;
+
+    println!("✅ {:?} 已连接到 MC 服务器", steam_id);
+
+    let mut read_buf = [0u8; BUFFER_SIZE];
+
+    loop {
+        // Send data from Steam to MC server
+        while let Ok(data) = to_mc_rx.try_recv() {
+            if let Err(e) = stream.write_all(&data) {
+                println!("✗ 写入 MC 服务器失败: {:?}", e);
+                return Ok(());
+            }
+        }
+
+        // Read data from MC server
+        match stream.read(&mut read_buf) {
+            Ok(0) => {
+                println!("MC 服务器关闭连接 ({:?})", steam_id);
+                return Ok(());
+            }
+            Ok(n) => {
+                if from_mc_tx.send((steam_id, read_buf[..n].to_vec())).is_err() {
+                    return Ok(());
+                }
+            }
+            Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
+                // No data available, continue
+            }
+            Err(e) => {
+                println!("✗ 读取 MC 服务器失败: {:?}", e);
+                return Ok(());
+            }
+        }
+
+        thread::sleep(Duration::from_micros(100));
+    }
 }
