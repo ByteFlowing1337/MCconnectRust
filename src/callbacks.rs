@@ -16,6 +16,7 @@ pub struct CallbackRegistry {
 }
 
 impl CallbackRegistry {
+    #[allow(dead_code)]
     pub fn register(client: &Client) -> Self {
         let join_lobby_id = Arc::new(Mutex::new(None));
         let join_lobby_clone = Arc::clone(&join_lobby_id);
@@ -86,6 +87,7 @@ impl CallbackRegistry {
     }
 }
 
+#[allow(dead_code)]
 fn describe_p2p_error(code: u8) -> &'static str {
     match code {
         0 => "None",
