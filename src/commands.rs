@@ -1,7 +1,9 @@
 use crate::client_mode::run_client;
 use crate::host::run_host;
 use crate::metrics;
+use crate::minecraft_discovery;
 use lazy_static::lazy_static;
+use log::info;
 use serde::Serialize;
 use std::sync::{mpsc, Mutex};
 use std::thread;
@@ -34,6 +36,31 @@ pub fn get_steam_name() -> String {
 #[command]
 pub fn get_lobby_id() -> Option<u64> {
     *LOBBY_ID.lock().unwrap()
+}
+
+#[derive(Serialize)]
+pub struct MinecraftServerInfo {
+    port: u16,
+    motd: String,
+}
+
+#[command]
+pub fn detect_minecraft_server() -> Option<MinecraftServerInfo> {
+    info!("Tauri: 收到自动检测 Minecraft 服务器请求");
+    
+    match minecraft_discovery::discover_minecraft_server() {
+        Some(server) => {
+            info!("Tauri: 检测到服务器 - {} (端口: {})", server.motd, server.port);
+            Some(MinecraftServerInfo {
+                port: server.port,
+                motd: server.motd,
+            })
+        }
+        None => {
+            info!("Tauri: 未检测到 Minecraft 服务器");
+            None
+        }
+    }
 }
 
 #[command]

@@ -10,6 +10,7 @@ mod config;
 mod host;
 mod lan_discovery;
 mod metrics;
+mod minecraft_discovery;
 
 use env_logger::Env;
 use std::io::Write;
@@ -24,6 +25,7 @@ fn main() {
             commands::get_steam_name,
             commands::get_lobby_id,
             commands::get_performance_metrics,
+            commands::detect_minecraft_server,
             commands::start_host,
             commands::join_lobby
         ])
