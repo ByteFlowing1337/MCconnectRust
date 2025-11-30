@@ -1,5 +1,6 @@
 use crate::config::BUFFER_SIZE;
 use crate::metrics;
+use log::{error, info, warn};
 use std::collections::HashMap;
 use std::io::{ErrorKind, Read, Write};
 use std::net::TcpStream;
@@ -21,7 +22,7 @@ struct PeerState {
 }
 
 pub fn run_host(client: Client, port: u16) -> Result<(), Box<dyn std::error::Error>> {
-    println!("🏗 正在创建 Steam 大厅...");
+    info!("🏗 正在创建 Steam 大厅...");
 
     // Create channel to receive lobby creation result
     let (tx, rx) = mpsc::channel();
@@ -35,14 +36,15 @@ pub fn run_host(client: Client, port: u16) -> Result<(), Box<dyn std::error::Err
         if let Ok(result) = rx.try_recv() {
             match result {
                 Ok(id) => {
-                    println!("┌─────────────────────────────────────");
-                    println!("│ ✓ 房间创建成功!");
-                    println!("│ 房间 ID: {}", id.raw());
-                    println!("│ 好友可通过此 ID 加入游戏");
-                    println!("└─────────────────────────────────────");
+                    info!("┌─────────────────────────────────────");
+                    info!("│ ✓ 房间创建成功!");
+                    info!("│ 房间 ID: {}", id.raw());
+                    info!("│ 好友可通过此 ID 加入游戏");
+                    info!("└─────────────────────────────────────");
                     break id;
                 }
                 Err(e) => {
+                    error!("✗ 房间创建失败: {:?}", e);
                     return Err(format!("✗ 房间创建失败: {:?}", e).into());
                 }
             }
@@ -56,7 +58,7 @@ pub fn run_host(client: Client, port: u16) -> Result<(), Box<dyn std::error::Err
         .networking_sockets()
         .create_listen_socket_p2p(0, vec![])
         .map_err(|err| format!("无法创建 Steam NetworkingSockets 监听端口: {err:?}"))?;
-    println!("📡 NetworkingSockets 监听已启动 (虚拟端口 0)");
+    info!("📡 NetworkingSockets 监听已启动 (虚拟端口 0)");
 
     let mut peers: HashMap<SteamId, PeerState> = HashMap::new();
     
@@ -64,35 +66,35 @@ pub fn run_host(client: Client, port: u16) -> Result<(), Box<dyn std::error::Err
     let (from_mc_tx, from_mc_rx): (Sender<(SteamId, Vec<u8>)>, Receiver<(SteamId, Vec<u8>)>) =
         mpsc::channel();
 
-    println!("");
-    println!("┌─────────────────────────────────────────────────────────┐");
-    println!("│  🎮 P2P 转发服务已启动                                  │");
-    println!("├─────────────────────────────────────────────────────────┤");
-    println!("│  本地 MC 服务器: 127.0.0.1:{}                       │", port);
-    println!("│  确保你的 Minecraft 服务器正在运行!                     │");
-    println!("└─────────────────────────────────────────────────────────┘");
-    println!("");
+    info!("");
+    info!("┌─────────────────────────────────────────────────────────┐");
+    info!("│  🎮 P2P 转发服务已启动                                  │");
+    info!("├─────────────────────────────────────────────────────────┤");
+    info!("│  本地 MC 服务器: 127.0.0.1:{}                       │", port);
+    info!("│  确保你的 Minecraft 服务器正在运行!                     │");
+    info!("└─────────────────────────────────────────────────────────┘");
+    info!("");
 
     // Performance metrics
     let session_metrics = metrics::SessionMetrics::new();
     let mut last_report_time = Instant::now();
 
-    println!("🔄 开始主循环，监听 NetworkingSockets 事件...");
+    info!("🔄 开始主循环，监听 NetworkingSockets 事件...");
 
     while RUNNING.load(Ordering::Relaxed) {
         client.run_callbacks();
 
         // Handle listen socket events first so connections are ready before data flows
         while let Some(event) = listen_socket.try_receive_event() {
-            println!("📥 收到 ListenSocket 事件");
+            info!("📥 收到 ListenSocket 事件");
             match event {
                 ListenSocketEvent::Connecting(request) => {
                     let remote = request.remote();
-                    println!("🔔 收到 NetworkingSockets 连接请求: {}", remote.debug_string());
+                    info!("🔔 收到 NetworkingSockets 连接请求: {}", remote.debug_string());
                     if let Err(err) = request.accept() {
-                        println!("✗ 无法接受连接: {err:?}");
+                        error!("✗ 无法接受连接: {err:?}");
                     } else {
-                        println!("✓ 连接请求已接受，等待 Connected 事件...");
+                        info!("✓ 连接请求已接受，等待 Connected 事件...");
                     }
                 }
                 ListenSocketEvent::Connected(connected) => {
@@ -109,7 +111,7 @@ pub fn run_host(client: Client, port: u16) -> Result<(), Box<dyn std::error::Err
                         let steam_id_clone = steam_id;
                         thread::spawn(move || {
                             if let Err(e) = bridge_to_mc_server(steam_id_clone, port, to_mc_rx, from_mc_tx_clone) {
-                                println!("⚠️ MC 服务器连接断开 ({:?}): {}", steam_id_clone, e);
+                                warn!("⚠️ MC 服务器连接断开 ({:?}): {}", steam_id_clone, e);
                             }
                         });
                         
@@ -118,12 +120,12 @@ pub fn run_host(client: Client, port: u16) -> Result<(), Box<dyn std::error::Err
                             PeerState { connection, to_mc_tx },
                         );
 
-                        println!("┌─────────────────────────────────────");
-                        println!("│ [新玩家] Steam ID: {:?}", steam_id);
-                        println!("│ 已建立连接并桥接到 MC 服务器");
-                        println!("└─────────────────────────────────────");
+                        info!("┌─────────────────────────────────────");
+                        info!("│ [新玩家] Steam ID: {:?}", steam_id);
+                        info!("│ 已建立连接并桥接到 MC 服务器");
+                        info!("└─────────────────────────────────────");
                     } else {
-                        println!(
+                        warn!(
                             "⚠️ 收到未知身份连接，无法映射 Steam ID: {}",
                             connected.remote().debug_string()
                         );
@@ -132,7 +134,7 @@ pub fn run_host(client: Client, port: u16) -> Result<(), Box<dyn std::error::Err
                 ListenSocketEvent::Disconnected(disconnected) => {
                     if let Some(steam_id) = disconnected.remote().steam_id() {
                         peers.remove(&steam_id);
-                        println!("👋 玩家离开: {:?}", steam_id);
+                        info!("👋 玩家离开: {:?}", steam_id);
                     }
                 }
             }
@@ -144,7 +146,7 @@ pub fn run_host(client: Client, port: u16) -> Result<(), Box<dyn std::error::Err
         while let Ok((steam_id, data)) = from_mc_rx.try_recv() {
             if let Some(peer) = peers.get(&steam_id) {
                 if let Err(err) = peer.connection.send_message(&data, SendFlags::RELIABLE_NO_NAGLE) {
-                    println!("✗ 发送数据到客户端失败: {err:?}");
+                    error!("✗ 发送数据到客户端失败: {err:?}");
                     metrics::record_packet_dropped();
                 } else {
                     metrics::record_packet_sent(data.len() as u64);
@@ -180,7 +182,7 @@ pub fn run_host(client: Client, port: u16) -> Result<(), Box<dyn std::error::Err
 
         for steam_id in peers_to_remove {
             peers.remove(&steam_id);
-            println!("🔌 移除断开的玩家: {:?}", steam_id);
+            info!("🔌 移除断开的玩家: {:?}", steam_id);
         }
 
         // Periodic reporting
@@ -203,11 +205,11 @@ fn bridge_to_mc_server(
     from_mc_tx: Sender<(SteamId, Vec<u8>)>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let addr = format!("127.0.0.1:{}", port);
-    println!("🔗 为 {:?} 连接 MC 服务器 {}...", steam_id, addr);
+    info!("🔗 为 {:?} 连接 MC 服务器 {}...", steam_id, addr);
 
     let mut stream = TcpStream::connect(&addr)?;
     stream.set_nodelay(true)?;
-    println!("✅ {:?} 已连接到 MC 服务器", steam_id);
+    info!("✅ {:?} 已连接到 MC 服务器", steam_id);
 
     // Create a thread to read from the MC server and send to the main thread
     let mut stream_clone = stream.try_clone()?;
@@ -216,7 +218,7 @@ fn bridge_to_mc_server(
         loop {
             match stream_clone.read(&mut read_buf) {
                 Ok(0) => {
-                    println!("MC 服务器关闭连接 ({:?})", steam_id);
+                    info!("MC 服务器关闭连接 ({:?})", steam_id);
                     break; // Connection closed
                 }
                 Ok(n) => {
@@ -229,7 +231,7 @@ fn bridge_to_mc_server(
                     thread::sleep(Duration::from_millis(10));
                 }
                 Err(e) => {
-                    println!("✗ 读取 MC 服务器失败: {:?}", e);
+                    error!("✗ 读取 MC 服务器失败: {:?}", e);
                     break;
                 }
             }

@@ -1,3 +1,4 @@
+use log::{info, warn};
 use std::net::UdpSocket;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -55,21 +56,21 @@ impl LanBroadcaster {
         let running = Arc::clone(&self.running);
 
         let handle = thread::spawn(move || {
-            println!("📡 LAN发现广播已启动");
-            println!("   服务器名称: {}", self.server_name);
-            println!("   服务器端口: {}", self.server_port);
+            info!("📡 LAN发现广播已启动");
+            info!("   服务器名称: {}", self.server_name);
+            info!("   服务器端口: {}", self.server_port);
 
             let mut broadcast_count = 0u32;
             
             while self.running.load(Ordering::Relaxed) {
                 if let Err(e) = self.broadcast_once() {
-                    println!("⚠ LAN广播发送失败: {:?}", e);
+                    warn!("⚠ LAN广播发送失败: {:?}", e);
                 } else {
                     broadcast_count += 1;
                     if broadcast_count == 1 {
-                        println!("✓ 首次LAN广播已发送");
+                        info!("✓ 首次LAN广播已发送");
                     } else if broadcast_count % 10 == 0 {
-                        println!("📊 已发送 {} 次LAN广播", broadcast_count);
+                        info!("📊 已发送 {} 次LAN广播", broadcast_count);
                     }
                 }
 
@@ -77,7 +78,7 @@ impl LanBroadcaster {
                 thread::sleep(Duration::from_millis(LAN_BROADCAST_INTERVAL_MS));
             }
 
-            println!("🛑 LAN发现广播已停止 (共发送 {} 次)", broadcast_count);
+            info!("🛑 LAN发现广播已停止 (共发送 {} 次)", broadcast_count);
         });
 
         BroadcastHandle {

@@ -6,6 +6,20 @@ mod host;
 mod lan_discovery;
 mod metrics;
 
+use env_logger::Env;
+use std::io::Write;
+use std::sync::Once;
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    init_logging();
     app::run()
+}
+
+fn init_logging() {
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        env_logger::Builder::from_env(Env::default().default_filter_or("info"))
+            .format(|buf, record| writeln!(buf, "[{:<5}] {}", record.level(), record.args()))
+            .init();
+    });
 }

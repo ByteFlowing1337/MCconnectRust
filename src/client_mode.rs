@@ -1,6 +1,7 @@
 use crate::config::{BUFFER_SIZE, CLIENT_LISTEN_PORT};
 use crate::lan_discovery::LanBroadcaster;
 use crate::metrics;
+use log::{error, info, warn};
 use std::io::{ErrorKind, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -10,7 +11,7 @@ use steamworks::networking_types::{NetworkingConnectionState, NetworkingIdentity
 use steamworks::{Client, LobbyId};
 
 pub fn run_client(client: Client, lobby_id: LobbyId) -> Result<(), Box<dyn std::error::Error>> {
-    println!("正在加入房间: {}", lobby_id.raw());
+    info!("正在加入房间: {}", lobby_id.raw());
 
     let (tx, rx) = mpsc::channel();
     client.matchmaking().join_lobby(lobby_id, move |result| {
@@ -22,11 +23,11 @@ pub fn run_client(client: Client, lobby_id: LobbyId) -> Result<(), Box<dyn std::
         if let Ok(result) = rx.try_recv() {
             match result {
                 Ok(_) => {
-                    println!(">>> 加入成功! <<<");
+                    info!(">>> 加入成功! <<<");
                     break;
                 }
                 Err(e) => {
-                    println!("加入失败: {:?}", e);
+                    error!("加入失败: {:?}", e);
                     return Ok(());
                 }
             }
@@ -35,15 +36,15 @@ pub fn run_client(client: Client, lobby_id: LobbyId) -> Result<(), Box<dyn std::
     }
 
     let host_id = client.matchmaking().lobby_owner(lobby_id);
-    println!("房主 Steam ID: {:?}", host_id);
+    info!("房主 Steam ID: {:?}", host_id);
 
     if host_id == client.user().steam_id() {
-        println!("!!! 错误: 无法连接自己，请使用两个不同的账号测试 !!!");
+        error!("!!! 错误: 无法连接自己，请使用两个不同的账号测试 !!!");
     
     }
 
     // 使用新版 NetworkingSockets API 连接房主
-    println!("📡 正在建立 NetworkingSockets 连接...");
+    info!("📡 正在建立 NetworkingSockets 连接...");
     let sockets = client.networking_sockets();
     let host_identity = NetworkingIdentity::new_steam_id(host_id);
     
@@ -59,7 +60,7 @@ pub fn run_client(client: Client, lobby_id: LobbyId) -> Result<(), Box<dyn std::
             if let Ok(state) = info.state() {
                 match state {
                     NetworkingConnectionState::Connected => {
-                        println!("✅ NetworkingSockets 连接已建立");
+                        info!("✅ NetworkingSockets 连接已建立");
                         break;
                     }
                     NetworkingConnectionState::ClosedByPeer
@@ -80,21 +81,21 @@ pub fn run_client(client: Client, lobby_id: LobbyId) -> Result<(), Box<dyn std::
     // 启动本地监听
     let listener = TcpListener::bind(format!("0.0.0.0:{}", CLIENT_LISTEN_PORT))?;
     listener.set_nonblocking(true)?;
-    println!(">>> 请在 Minecraft 中连接: 127.0.0.1:{}", CLIENT_LISTEN_PORT);
+    info!(">>> 请在 Minecraft 中连接: 127.0.0.1:{}", CLIENT_LISTEN_PORT);
 
     // 启动LAN发现广播
     let broadcaster = LanBroadcaster::new(None, CLIENT_LISTEN_PORT)?;
     let _broadcast_handle = broadcaster.start();
-    println!("✓ Minecraft LAN发现广播已启动");
+    info!("✓ Minecraft LAN发现广播已启动");
 
-    println!("");
-    println!("┌─────────────────────────────────────────────────────────┐");
-    println!("│  ✅ 已连接到房主!                                       │");
-    println!("├─────────────────────────────────────────────────────────┤");
-    println!("│  🎮 Minecraft 连接方式:                                 │");
-    println!("│     多人游戏 -> 添加服务器 -> 输入: 127.0.0.1:{}    │", CLIENT_LISTEN_PORT);
-    println!("└─────────────────────────────────────────────────────────┘");
-    println!("");
+    info!("");
+    info!("┌─────────────────────────────────────────────────────────┐");
+    info!("│  ✅ 已连接到房主!                                       │");
+    info!("├─────────────────────────────────────────────────────────┤");
+    info!("│  🎮 Minecraft 连接方式:                                 │");
+    info!("│     多人游戏 -> 添加服务器 -> 输入: 127.0.0.1:{}    │", CLIENT_LISTEN_PORT);
+    info!("└─────────────────────────────────────────────────────────┘");
+    info!("");
 
     // Channel: MC读取线程 -> 主循环 (发送到Steam)
     let (from_mc_tx, from_mc_rx): (Sender<Vec<u8>>, Receiver<Vec<u8>>) = mpsc::channel();
@@ -119,9 +120,9 @@ pub fn run_client(client: Client, lobby_id: LobbyId) -> Result<(), Box<dyn std::
         if mc_stream.is_none() {
             match listener.accept() {
                 Ok((stream, addr)) => {
-                    println!("┌─────────────────────────────────────");
-                    println!("│ [连接] MC 客户端已连接: {}", addr);
-                    println!("└─────────────────────────────────────");
+                    info!("┌─────────────────────────────────────");
+                    info!("│ [连接] MC 客户端已连接: {}", addr);
+                    info!("└─────────────────────────────────────");
                     
                     stream.set_nodelay(true)?;
                     
@@ -134,7 +135,7 @@ pub fn run_client(client: Client, lobby_id: LobbyId) -> Result<(), Box<dyn std::
                             loop {
                                 match read_stream.read(&mut buffer) {
                                     Ok(0) => {
-                                        println!("[读取线程] MC 客户端断开连接");
+                                        info!("[读取线程] MC 客户端断开连接");
                                         break;
                                     }
                                     Ok(n) => {
@@ -146,7 +147,7 @@ pub fn run_client(client: Client, lobby_id: LobbyId) -> Result<(), Box<dyn std::
                                         thread::sleep(Duration::from_micros(100));
                                     }
                                     Err(e) => {
-                                        println!("✗ 读取 MC 失败: {:?}", e);
+                                        error!("✗ 读取 MC 失败: {:?}", e);
                                         break;
                                     }
                                 }
@@ -159,7 +160,7 @@ pub fn run_client(client: Client, lobby_id: LobbyId) -> Result<(), Box<dyn std::
                 }
                 Err(ref e) if e.kind() == ErrorKind::WouldBlock => {}
                 Err(e) => {
-                    println!("等待 MC 连接时发生错误: {:?}", e);
+                    error!("等待 MC 连接时发生错误: {:?}", e);
                 }
             }
         }
@@ -171,7 +172,7 @@ pub fn run_client(client: Client, lobby_id: LobbyId) -> Result<(), Box<dyn std::
                     metrics::record_packet_sent(data.len() as u64);
                 }
                 Err(err) => {
-                    println!("✗ 发送到房主失败: {:?}", err);
+                    error!("✗ 发送到房主失败: {:?}", err);
                     metrics::record_packet_dropped();
                 }
             }
@@ -190,14 +191,14 @@ pub fn run_client(client: Client, lobby_id: LobbyId) -> Result<(), Box<dyn std::
                     // 直接写入 MC stream
                     if let Some(ref mut stream) = mc_stream {
                         if let Err(e) = stream.write_all(data) {
-                            println!("✗ 写入 MC 失败: {:?}", e);
+                            error!("✗ 写入 MC 失败: {:?}", e);
                             mc_stream = None;
                         }
                     }
                 }
             }
             Err(err) => {
-                println!("⚠️ 从房主接收数据失败: {:?}", err);
+                warn!("⚠️ 从房主接收数据失败: {:?}", err);
             }
         }
 

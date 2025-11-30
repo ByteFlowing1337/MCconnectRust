@@ -1,3 +1,4 @@
+use log::info;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
@@ -112,6 +113,6 @@ impl SessionMetrics {
     /// 打印会话报告
     pub fn print_report(&self) {
         let (stats, duration) = self.get_session_stats();
-        println!("│ 性能报告: {}", stats.format_report(duration));
+        info!("│ 性能报告: {}", stats.format_report(duration));
     }
 }

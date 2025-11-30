@@ -2,6 +2,7 @@ use crate::callbacks::CallbackRegistry;
 use crate::client_mode::run_client;
 use crate::config::MC_SERVER_PORT;
 use crate::host::run_host;
+use log::{info, warn};
 use steamworks::{Client, LobbyId};
 use std::io::{self, Write};
 use std::thread;
@@ -15,19 +16,19 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     relay_utils.init_relay_network_access();
     let relay_status = relay_utils.relay_network_status();
     
-    println!("\n╔════════════════════════════════════════════╗");
-    println!("║   🎮 Steam MC Connect Tool v0.1.0         ║");
-    println!("╠════════════════════════════════════════════╣");
-    println!("║ Steam 用户: {:<31}║", client.friends().name());
-    println!("║ 中继状态: {:<32}║", format!("{:?}", relay_status));
-    println!("╚════════════════════════════════════════════╝\n");
+    info!("\n╔════════════════════════════════════════════╗");
+    info!("║   🎮 Steam MC Connect Tool v0.1.0         ║");
+    info!("╠════════════════════════════════════════════╣");
+    info!("║ Steam 用户: {:<31}║", client.friends().name());
+    info!("║ 中继状态: {:<32}║", format!("{:?}", relay_status));
+    info!("╚════════════════════════════════════════════╝\n");
 
     let callbacks = CallbackRegistry::register(&client);
 
-    println!("请选择模式:");
-    println!("  1.  [主机] 创建房间 (我是服主)");
-    println!("  2.  [客机] 加入房间 (输入房间号)");
-    println!("  3.  [自动] 等待好友邀请/加入");
+    info!("请选择模式:");
+    info!("  1.  [主机] 创建房间 (我是服主)");
+    info!("  2.  [客机] 加入房间 (输入房间号)");
+    info!("  3.  [自动] 等待好友邀请/加入");
     print!("\n请输入 > ");
     std::io::stdout().flush()?;
 
@@ -57,7 +58,7 @@ fn run_host_mode(client: Client) -> Result<(), Box<dyn std::error::Error>> {
         match trimmed.parse::<u16>() {
             Ok(port) => break port,
             Err(_) => {
-                println!("✗ 无效的端口号，请输入一个 1-65535 之间的数字。");
+                warn!("✗ 无效的端口号，请输入一个 1-65535 之间的数字。");
             }
         }
     };
@@ -77,12 +78,12 @@ fn run_client_mode(
 
     if let Some(lobby_id) = target_lobby {
         if lobby_id.raw() == 0 {
-            println!("✗ 无效或空的大厅 ID。");
+            warn!("✗ 无效或空的大厅 ID。");
         } else {
             run_client(client, lobby_id)?;
         }
     } else {
-        println!("未找到大厅。");
+        warn!("未找到大厅。");
     }
 
     Ok(())
@@ -96,13 +97,13 @@ fn ask_lobby_id() -> Result<Option<LobbyId>, Box<dyn std::error::Error>> {
         io::stdin().read_line(&mut id_str)?;
         let trimmed = id_str.trim();
         if trimmed.is_empty() {
-            println!("✗ 房间号不能为空。");
+            warn!("✗ 房间号不能为空。");
             continue;
         }
         match trimmed.parse::<u64>() {
             Ok(id) => break LobbyId::from_raw(id),
             Err(_) => {
-                println!("✗ 无效的房间号，请输入一个纯数字 ID。");
+                warn!("✗ 无效的房间号，请输入一个纯数字 ID。");
             }
         }
     };
@@ -110,7 +111,7 @@ fn ask_lobby_id() -> Result<Option<LobbyId>, Box<dyn std::error::Error>> {
 }
 
 fn wait_for_invite(client: &Client, callbacks: &CallbackRegistry) -> Option<LobbyId> {
-    println!("\n 正在等待好友邀请... (保持此界面不动)");
+    info!("\n 正在等待好友邀请... (保持此界面不动)");
     loop {
         client.run_callbacks();
         if let Some(id) = *callbacks.join_lobby_id.lock().unwrap() {
