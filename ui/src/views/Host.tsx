@@ -82,7 +82,7 @@ export const Host: React.FC<HostProps> = ({ onBack, connectionState, onConnectio
   const [detecting, setDetecting] = useState(true);
   const [detectedServer, setDetectedServer] = useState<MinecraftServerInfo | null>(null);
   const [detectionAttempts, setDetectionAttempts] = useState(0);
-  const detectionIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const detectionIntervalRef = useRef<number | null>(null);
 
   // 当状态恢复为running时，停止检测
   useEffect(() => {
