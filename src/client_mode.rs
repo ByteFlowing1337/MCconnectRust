@@ -1,4 +1,5 @@
 use crate::config::{BUFFER_SIZE, CLIENT_LISTEN_PORT};
+use crate::lan_discovery::LanBroadcaster;
 use crate::metrics;
 use crate::send_queue::SendQueue;
 use crate::util::send_reliable_with_retry;
@@ -43,6 +44,11 @@ pub fn run_client(client: Client, lobby_id: LobbyId) -> Result<(), Box<dyn std::
 
     let listener = TcpListener::bind(format!("0.0.0.0:{}", CLIENT_LISTEN_PORT))?;
     println!(">>> 请在 Minecraft 中连接: 127.0.0.1:{}", CLIENT_LISTEN_PORT);
+
+    // 启动LAN发现广播
+    let broadcaster = LanBroadcaster::new(None, CLIENT_LISTEN_PORT)?;
+    let _broadcast_handle = broadcaster.start();
+    println!("✓ Minecraft LAN发现广播已启动");
 
     let mut local_stream: Option<std::net::TcpStream> = None;
     let (disconnect_tx, disconnect_rx) = mpsc::channel();
