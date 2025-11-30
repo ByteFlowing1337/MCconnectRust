@@ -12,7 +12,6 @@ use steamworks::networking_sockets::NetConnection;
 use steamworks::networking_types::{ListenSocketEvent, SendFlags};
 use steamworks::{Client, LobbyType, SteamId};
 
-
 static RUNNING: AtomicBool = AtomicBool::new(true);
 
 struct PeerState {
@@ -26,9 +25,11 @@ pub fn run_host(client: Client, port: u16) -> Result<(), Box<dyn std::error::Err
 
     // Create channel to receive lobby creation result
     let (tx, rx) = mpsc::channel();
-    client.matchmaking().create_lobby(LobbyType::Public, 10, move |result| {
-        let _ = tx.send(result);
-    });
+    client
+        .matchmaking()
+        .create_lobby(LobbyType::Public, 10, move |result| {
+            let _ = tx.send(result);
+        });
 
     // Wait for lobby creation result
     let _lobby_id = loop {
@@ -52,7 +53,6 @@ pub fn run_host(client: Client, port: u16) -> Result<(), Box<dyn std::error::Err
         thread::sleep(Duration::from_millis(10));
     };
 
-
     // Peer management: SteamId -> NetConnection
     let listen_socket = client
         .networking_sockets()
@@ -61,7 +61,7 @@ pub fn run_host(client: Client, port: u16) -> Result<(), Box<dyn std::error::Err
     info!("📡 NetworkingSockets 监听已启动 (虚拟端口 0)");
 
     let mut peers: HashMap<SteamId, PeerState> = HashMap::new();
-    
+
     // Channel to receive data from MC server threads: (steam_id, data)
     let (from_mc_tx, from_mc_rx): (Sender<(SteamId, Vec<u8>)>, Receiver<(SteamId, Vec<u8>)>) =
         mpsc::channel();
@@ -70,7 +70,10 @@ pub fn run_host(client: Client, port: u16) -> Result<(), Box<dyn std::error::Err
     info!("┌─────────────────────────────────────────────────────────┐");
     info!("│  🎮 P2P 转发服务已启动                                  │");
     info!("├─────────────────────────────────────────────────────────┤");
-    info!("│  本地 MC 服务器: 127.0.0.1:{}                       │", port);
+    info!(
+        "│  本地 MC 服务器: 127.0.0.1:{}                       │",
+        port
+    );
     info!("│  确保你的 Minecraft 服务器正在运行!                     │");
     info!("└─────────────────────────────────────────────────────────┘");
     info!("");
@@ -90,7 +93,10 @@ pub fn run_host(client: Client, port: u16) -> Result<(), Box<dyn std::error::Err
             match event {
                 ListenSocketEvent::Connecting(request) => {
                     let remote = request.remote();
-                    info!("🔔 收到 NetworkingSockets 连接请求: {}", remote.debug_string());
+                    info!(
+                        "🔔 收到 NetworkingSockets 连接请求: {}",
+                        remote.debug_string()
+                    );
                     if let Err(err) = request.accept() {
                         error!("✗ 无法接受连接: {err:?}");
                     } else {
@@ -101,23 +107,31 @@ pub fn run_host(client: Client, port: u16) -> Result<(), Box<dyn std::error::Err
                     let remote = connected.remote();
                     if let Some(steam_id) = remote.steam_id() {
                         let connection = connected.take_connection();
-                        
+
                         // Create channel for sending data to MC server
                         let (to_mc_tx, to_mc_rx): (Sender<Vec<u8>>, Receiver<Vec<u8>>) =
                             mpsc::channel();
-                        
+
                         // Spawn thread to bridge this peer to MC server
                         let from_mc_tx_clone = from_mc_tx.clone();
                         let steam_id_clone = steam_id;
                         thread::spawn(move || {
-                            if let Err(e) = bridge_to_mc_server(steam_id_clone, port, to_mc_rx, from_mc_tx_clone) {
+                            if let Err(e) = bridge_to_mc_server(
+                                steam_id_clone,
+                                port,
+                                to_mc_rx,
+                                from_mc_tx_clone,
+                            ) {
                                 warn!("⚠️ MC 服务器连接断开 ({:?}): {}", steam_id_clone, e);
                             }
                         });
-                        
+
                         peers.insert(
                             steam_id,
-                            PeerState { connection, to_mc_tx },
+                            PeerState {
+                                connection,
+                                to_mc_tx,
+                            },
                         );
 
                         info!("┌─────────────────────────────────────");
@@ -140,12 +154,13 @@ pub fn run_host(client: Client, port: u16) -> Result<(), Box<dyn std::error::Err
             }
         }
 
-
-
         // Process data from MC server -> Send to peers via Steam
         while let Ok((steam_id, data)) = from_mc_rx.try_recv() {
             if let Some(peer) = peers.get(&steam_id) {
-                if let Err(err) = peer.connection.send_message(&data, SendFlags::RELIABLE_NO_NAGLE) {
+                if let Err(err) = peer
+                    .connection
+                    .send_message(&data, SendFlags::RELIABLE_NO_NAGLE)
+                {
                     error!("✗ 发送数据到客户端失败: {err:?}");
                     metrics::record_packet_dropped();
                 } else {
@@ -227,7 +242,7 @@ fn bridge_to_mc_server(
                     }
                 }
                 Err(e) if e.kind() == ErrorKind::WouldBlock => {
-                     // This should not happen with blocking sockets
+                    // This should not happen with blocking sockets
                     thread::sleep(Duration::from_millis(10));
                 }
                 Err(e) => {
@@ -244,7 +259,7 @@ fn bridge_to_mc_server(
             break; // MC server connection closed
         }
     }
-    
+
     // The loop exits when to_mc_rx is disconnected (peer disconnected).
     // The upstream_thread will exit automatically when from_mc_tx is dropped.
     let _ = upstream_thread.join();

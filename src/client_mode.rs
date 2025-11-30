@@ -40,14 +40,13 @@ pub fn run_client(client: Client, lobby_id: LobbyId) -> Result<(), Box<dyn std::
 
     if host_id == client.user().steam_id() {
         error!("!!! 错误: 无法连接自己，请使用两个不同的账号测试 !!!");
-    
     }
 
     // 使用新版 NetworkingSockets API 连接房主
     info!("📡 正在建立 NetworkingSockets 连接...");
     let sockets = client.networking_sockets();
     let host_identity = NetworkingIdentity::new_steam_id(host_id);
-    
+
     let mut connection = sockets
         .connect_p2p(host_identity, 0, vec![])
         .map_err(|_| "无法向房主发起连接，Steam NetworkingSockets 初始化失败")?;
@@ -81,7 +80,10 @@ pub fn run_client(client: Client, lobby_id: LobbyId) -> Result<(), Box<dyn std::
     // 启动本地监听
     let listener = TcpListener::bind(format!("0.0.0.0:{}", CLIENT_LISTEN_PORT))?;
     listener.set_nonblocking(true)?;
-    info!(">>> 请在 Minecraft 中连接: 127.0.0.1:{}", CLIENT_LISTEN_PORT);
+    info!(
+        ">>> 请在 Minecraft 中连接: 127.0.0.1:{}",
+        CLIENT_LISTEN_PORT
+    );
 
     // 启动LAN发现广播
     let broadcaster = LanBroadcaster::new(None, CLIENT_LISTEN_PORT)?;
@@ -93,13 +95,16 @@ pub fn run_client(client: Client, lobby_id: LobbyId) -> Result<(), Box<dyn std::
     info!("│  ✅ 已连接到房主!                                       │");
     info!("├─────────────────────────────────────────────────────────┤");
     info!("│  🎮 Minecraft 连接方式:                                 │");
-    info!("│     多人游戏 -> 添加服务器 -> 输入: 127.0.0.1:{}    │", CLIENT_LISTEN_PORT);
+    info!(
+        "│     多人游戏 -> 添加服务器 -> 输入: 127.0.0.1:{}    │",
+        CLIENT_LISTEN_PORT
+    );
     info!("└─────────────────────────────────────────────────────────┘");
     info!("");
 
     // Channel: MC读取线程 -> 主循环 (发送到Steam)
     let (from_mc_tx, from_mc_rx): (Sender<Vec<u8>>, Receiver<Vec<u8>>) = mpsc::channel();
-    
+
     let mut mc_stream: Option<TcpStream> = None;
     let mut mc_read_thread_started = false;
 
@@ -123,9 +128,9 @@ pub fn run_client(client: Client, lobby_id: LobbyId) -> Result<(), Box<dyn std::
                     info!("┌─────────────────────────────────────");
                     info!("│ [连接] MC 客户端已连接: {}", addr);
                     info!("└─────────────────────────────────────");
-                    
+
                     stream.set_nodelay(true)?;
-                    
+
                     // 启动 MC -> Steam 读取线程
                     if !mc_read_thread_started {
                         let mut read_stream = stream.try_clone()?;
@@ -187,7 +192,7 @@ pub fn run_client(client: Client, lobby_id: LobbyId) -> Result<(), Box<dyn std::
                         continue;
                     }
                     metrics::record_packet_received(data.len() as u64);
-                    
+
                     // 直接写入 MC stream
                     if let Some(ref mut stream) = mc_stream {
                         if let Err(e) = stream.write_all(data) {

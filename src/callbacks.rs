@@ -1,7 +1,10 @@
 use log::{info, warn};
 use std::sync::{Arc, Mutex};
 use steamworks::networking_types::NetConnectionStatusChanged;
-use steamworks::{CallbackHandle, Client, GameLobbyJoinRequested, LobbyId, P2PSessionConnectFail, P2PSessionRequest};
+use steamworks::{
+    CallbackHandle, Client, GameLobbyJoinRequested, LobbyId, P2PSessionConnectFail,
+    P2PSessionRequest,
+};
 
 pub struct CallbackRegistry {
     pub join_lobby_id: Arc<Mutex<Option<LobbyId>>>,
@@ -39,33 +42,38 @@ impl CallbackRegistry {
             warn!("┌─────────────────────────────────────");
             warn!("│ ✗ P2P 连接失败");
             warn!("│ 对方: {:?}", fail.remote);
-            warn!("│ 错误码: {} ({})", fail.error, describe_p2p_error(fail.error));
+            warn!(
+                "│ 错误码: {} ({})",
+                fail.error,
+                describe_p2p_error(fail.error)
+            );
             warn!("│ 提示: 检查对方是否在线且运行相同应用");
             warn!("└─────────────────────────────────────");
         });
 
-        let net_status_handle = client.register_callback(move |event: NetConnectionStatusChanged| {
-            let current_state = event.connection_info.state();
-            info!("┌─────────────────────────────────────");
-            info!("│  连接状态变更");
-            info!("│ 旧状态: {:?}", event.old_state);
-            info!("│ 新状态: {:?}", current_state);
+        let net_status_handle =
+            client.register_callback(move |event: NetConnectionStatusChanged| {
+                let current_state = event.connection_info.state();
+                info!("┌─────────────────────────────────────");
+                info!("│  连接状态变更");
+                info!("│ 旧状态: {:?}", event.old_state);
+                info!("│ 新状态: {:?}", current_state);
 
-            if let Some(remote) = event.connection_info.identity_remote() {
-                info!("│ 远程: {:?}", remote);
-            }
+                if let Some(remote) = event.connection_info.identity_remote() {
+                    info!("│ 远程: {:?}", remote);
+                }
 
-            if let Some(reason) = event.connection_info.end_reason() {
-                info!("│ 结束原因: {:?}", reason);
-            }
-            info!("└─────────────────────────────────────");
+                if let Some(reason) = event.connection_info.end_reason() {
+                    info!("│ 结束原因: {:?}", reason);
+                }
+                info!("└─────────────────────────────────────");
 
-            /*
-            if event.old_state != NetworkingConnectionState::Connected {
-                info!("连接详情: {:?}", event.connection_info);
-            }
-            */
-        });
+                /*
+                if event.old_state != NetworkingConnectionState::Connected {
+                    info!("连接详情: {:?}", event.connection_info);
+                }
+                */
+            });
 
         Self {
             join_lobby_id,

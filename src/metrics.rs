@@ -62,7 +62,9 @@ impl MetricsSnapshot {
     pub fn delta(&self, earlier: &MetricsSnapshot) -> MetricsSnapshot {
         MetricsSnapshot {
             packets_sent: self.packets_sent.saturating_sub(earlier.packets_sent),
-            packets_received: self.packets_received.saturating_sub(earlier.packets_received),
+            packets_received: self
+                .packets_received
+                .saturating_sub(earlier.packets_received),
             bytes_sent: self.bytes_sent.saturating_sub(earlier.bytes_sent),
             bytes_received: self.bytes_received.saturating_sub(earlier.bytes_received),
             packets_dropped: self.packets_dropped.saturating_sub(earlier.packets_dropped),

@@ -3,10 +3,10 @@ use crate::client_mode::run_client;
 use crate::config::MC_SERVER_PORT;
 use crate::host::run_host;
 use log::{info, warn};
-use steamworks::{Client, LobbyId};
 use std::io::{self, Write};
 use std::thread;
 use std::time::Duration;
+use steamworks::{Client, LobbyId};
 
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let client = Client::init()?;
@@ -15,7 +15,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let relay_utils = client.networking_utils();
     relay_utils.init_relay_network_access();
     let relay_status = relay_utils.relay_network_status();
-    
+
     info!("\n╔════════════════════════════════════════════╗");
     info!("║   🎮 Steam MC Connect Tool v0.1.0         ║");
     info!("╠════════════════════════════════════════════╣");

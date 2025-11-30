@@ -1,6 +1,12 @@
+#![cfg_attr(
+    all(not(debug_assertions), target_os = "windows"),
+    windows_subsystem = "windows"
+)]
+
 mod app;
 mod callbacks;
 mod client_mode;
+mod commands;
 mod config;
 mod host;
 mod lan_discovery;
@@ -10,9 +16,18 @@ use env_logger::Env;
 use std::io::Write;
 use std::sync::Once;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() {
     init_logging();
-    app::run()
+
+    tauri::Builder::default()
+        .plugin(tauri_plugin_shell::init())
+        .invoke_handler(tauri::generate_handler![
+            commands::get_steam_name,
+            commands::start_host,
+            commands::join_lobby
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
 }
 
 fn init_logging() {

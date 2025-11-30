@@ -21,10 +21,13 @@ impl LanBroadcaster {
     /// # Arguments
     /// * `server_name` - 服务器名称（显示在MC客户端中）
     /// * `server_port` - 服务器端口（MC客户端连接的端口）
-    pub fn new(server_name: Option<String>, server_port: u16) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new(
+        server_name: Option<String>,
+        server_port: u16,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         // 创建UDP socket用于发送广播
         let socket = UdpSocket::bind("0.0.0.0:0")?;
-        
+
         Ok(LanBroadcaster {
             socket,
             server_name: server_name.unwrap_or_else(|| LAN_SERVER_NAME.to_string()),
@@ -44,7 +47,7 @@ impl LanBroadcaster {
         // 发送到本地回环地址，MC客户端会监听此端口
         let target = format!("127.0.0.1:{}", LAN_DISCOVERY_PORT);
         self.socket.send_to(message.as_bytes(), &target)?;
-        
+
         Ok(())
     }
 
@@ -61,7 +64,7 @@ impl LanBroadcaster {
             info!("   服务器端口: {}", self.server_port);
 
             let mut broadcast_count = 0u32;
-            
+
             while self.running.load(Ordering::Relaxed) {
                 if let Err(e) = self.broadcast_once() {
                     warn!("⚠ LAN广播发送失败: {:?}", e);
