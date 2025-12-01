@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { PerformancePanel } from '../components/PerformancePanel';
-import { ArrowLeft, LogIn, Loader2, CheckCircle, Globe } from 'lucide-react';
+import { ArrowLeft, LogIn, Loader2, CheckCircle, Globe, Radio, Server, Wifi, XCircle } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 
 interface ConnectionState {
@@ -30,12 +30,22 @@ interface PerformanceMetrics {
   latency_ms?: number | null;
 }
 
+interface LanServer {
+  ip: string;
+  port: number;
+  motd: string;
+  latency_ms: number;
+}
+
 export const Client: React.FC<ClientProps> = ({ onBack, connectionState, onConnectionChange }) => {
   const [lobbyId, setLobbyId] = useState('');
   const [password, setPassword] = useState('');
   const [status, setStatus] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle');
   const [message, setMessage] = useState('');
   const [metrics, setMetrics] = useState<PerformanceMetrics | null>(null);
+  const [lanServer, setLanServer] = useState<LanServer | null>(null);
+  const [discoveryStatus, setDiscoveryStatus] = useState<'idle' | 'scanning' | 'found' | 'not_found'>('idle');
+
 
   // 检查是否有活跃的连接，恢复状态
   useEffect(() => {
@@ -89,6 +99,23 @@ export const Client: React.FC<ClientProps> = ({ onBack, connectionState, onConne
     }
   };
 
+  const handleDiscover = async () => {
+    setDiscoveryStatus('scanning');
+    setLanServer(null);
+    try {
+      const server = await invoke<LanServer | null>('detect_minecraft_server');
+      if (server) {
+        setLanServer(server);
+        setDiscoveryStatus('found');
+      } else {
+        setDiscoveryStatus('not_found');
+      }
+    } catch (e) {
+      console.error('Failed to discover LAN server:', e);
+      setDiscoveryStatus('not_found');
+    }
+  };
+
   // Poll performance metrics every 2 seconds when connected
   useEffect(() => {
     if (status !== 'connected') return;
@@ -135,6 +162,64 @@ export const Client: React.FC<ClientProps> = ({ onBack, connectionState, onConne
           {/* Lobby ID Input */}
           {status !== 'connected' && (
             <>
+              {/* LAN Discovery Section */}
+              <div className="space-y-4">
+                <Button
+                  onClick={handleDiscover}
+                  disabled={discoveryStatus === 'scanning'}
+                  variant="secondary"
+                  className="w-full"
+                >
+                  {discoveryStatus === 'scanning' ? (
+                    <>
+                      <Loader2 size={20} className="animate-spin" />
+                      <span>正在扫描...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Radio size={20} />
+                      <span>扫描局域网服务器</span>
+                    </>
+                  )}
+                </Button>
+
+                {discoveryStatus === 'found' && lanServer && (
+                  <div className="bg-white/10 p-4 rounded-2xl animate-fade-in border border-white/20">
+                    <div className="flex items-center space-x-4">
+                      <div className="p-2 bg-green-500/20 rounded-lg">
+                        <Server size={22} className="text-green-400" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-bold text-white/90 truncate">{lanServer.motd}</p>
+                        <p className="text-sm text-white/70">{lanServer.ip}:{lanServer.port}</p>
+                      </div>
+                      <div className="text-right">
+                        <div className="flex items-center space-x-1 text-green-400">
+                          <Wifi size={14} />
+                          <span className="font-medium text-sm">{lanServer.latency_ms.toFixed(0)} ms</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {discoveryStatus === 'not_found' && (
+                  <div className="bg-red-500/10 p-4 rounded-2xl flex items-center space-x-3 text-red-300 animate-fade-in border border-red-500/20">
+                    <XCircle size={20} />
+                    <p className="text-sm font-medium">未找到局域网服务器</p>
+                  </div>
+                )}
+              </div>
+              
+              <div className="relative flex items-center justify-center">
+                <div className="absolute inset-0 flex items-center" aria-hidden="true">
+                  <div className="w-full border-t border-white/10"></div>
+                </div>
+                <div className="relative flex justify-center">
+                  <span className="bg-white/5 px-3 text-sm font-medium text-white/50 backdrop-blur-sm rounded-full">或</span>
+                </div>
+              </div>
+
               <div>
                 <label className="block text-sm font-semibold text-white/70 mb-3 tracking-wide">
                   房间号 (Lobby ID)

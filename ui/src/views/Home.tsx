@@ -1,6 +1,7 @@
 import React from 'react';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
+import { LogConsole } from '../components/LogConsole';
 import { Server, Users, Wifi, WifiOff } from 'lucide-react';
 
 interface ConnectionState {
@@ -103,6 +104,10 @@ export const Home: React.FC<HomeProps> = ({ onNavigate, steamName, connectionSta
           </Button>
         </div>
       </Card>
+
+      <div className="w-full max-w-md">
+        <LogConsole />
+      </div>
     </div>
   );
 };

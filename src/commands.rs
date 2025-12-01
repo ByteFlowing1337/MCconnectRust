@@ -39,23 +39,17 @@ pub fn get_lobby_id() -> Option<u64> {
     *LOBBY_ID.lock().unwrap()
 }
 
-#[derive(Serialize)]
-pub struct MinecraftServerInfo {
-    port: u16,
-    motd: String,
-}
-
 #[command]
-pub fn detect_minecraft_server() -> Option<MinecraftServerInfo> {
+pub fn detect_minecraft_server() -> Option<minecraft_discovery::MinecraftServer> {
     info!("Tauri: 收到自动检测 Minecraft 服务器请求");
-    
+
     match minecraft_discovery::discover_minecraft_server() {
         Some(server) => {
-            info!("Tauri: 检测到服务器 - {} (端口: {})", server.motd, server.port);
-            Some(MinecraftServerInfo {
-                port: server.port,
-                motd: server.motd,
-            })
+            info!(
+                "Tauri: 检测到服务器 - {} ({}:{}) at {:.2}ms",
+                server.motd, server.ip, server.port, server.latency_ms
+            );
+            Some(server)
         }
         None => {
             info!("Tauri: 未检测到 Minecraft 服务器");

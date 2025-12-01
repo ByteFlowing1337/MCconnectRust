@@ -35,16 +35,44 @@ pub fn run_client(client: Client, lobby_id: LobbyId, password: Option<String>) -
         thread::sleep(Duration::from_millis(50));
     }
 
-    // 验证房间密码
-    let lobby_password = client.matchmaking().lobby_data(lobby_id, "password");
-    if let Some(ref pwd) = password {
-        if lobby_password.as_deref() != Some(pwd.as_str()) {
-            return Err("房间密码错误".into());
+    // 验证房间密码，增加重试逻辑应对Steam后端数据同步延迟
+    let lobby_password = (0..15)
+        .find_map(|i| {
+            client.run_callbacks();
+            if i > 0 {
+                thread::sleep(Duration::from_millis(200));
+            }
+            let pw = client.matchmaking().lobby_data(lobby_id, "password");
+
+            // 如果客户端提供了密码，我们必须等到从lobby元数据中读到密码
+            if password.is_some() && pw.is_none() {
+                info!("等待房间密码数据同步... (尝试 #{})", i + 1);
+                None
+            } else {
+                Some(pw)
+            }
+        })
+        .flatten();
+
+    // 执行密码验证
+    match (password.as_deref(), lobby_password.as_deref()) {
+        // 客户端提供了密码
+        (Some(client_pwd), Some(lobby_pwd)) => {
+            if client_pwd != lobby_pwd {
+                return Err("房间密码错误".into());
+            }
         }
-        info!("✓ 密码验证成功");
-    } else if lobby_password.is_some() {
-        return Err("房间需要密码，但未提供密码".into());
+        (Some(_), None) => {
+            return Err("验证密码超时，或房主未设置密码".into());
+        }
+        // 客户端未提供密码，但房间有密码 (且不为空)
+        (None, Some(lobby_pwd)) if !lobby_pwd.is_empty() => {
+            return Err("房间需要密码，但未提供密码".into());
+        }
+        // 其他情况（都无密码，或房间密码为空）均视为通过
+        _ => {}
     }
+    info!("✓ 密码验证成功");
 
     let host_id = client.matchmaking().lobby_owner(lobby_id);
     info!("房主 Steam ID: {:?}", host_id);
