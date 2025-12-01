@@ -5,15 +5,24 @@
 @layer base {
   html,
   body {
-    @apply bg-gradient-to-br from-gray-900 via-gray-800 to-black;
+    @apply bg-[#0f172a];
     min-height: 100vh;
     height: auto;
     overflow-x: hidden;
+    overflow-y: auto;
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* IE and Edge */
+  }
+
+  html::-webkit-scrollbar,
+  body::-webkit-scrollbar {
+    display: none; /* Chrome, Safari, Opera */
   }
 
   #root {
     min-height: 100vh;
     height: auto;
+    isolation: isolate; /* 创建新的堆叠上下文 */
   }
 }
 

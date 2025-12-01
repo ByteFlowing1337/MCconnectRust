@@ -29,9 +29,11 @@ pub struct PerformanceMetrics {
 }
 
 #[command]
-pub fn get_steam_name() -> String {
-    let client = Client::init().unwrap();
-    client.friends().name()
+pub fn get_steam_name() -> Result<String, String> {
+    match Client::init() {
+        Ok(client) => Ok(client.friends().name()),
+        Err(e) => Err(format!("Steam 未运行或初始化失败: {}", e)),
+    }
 }
 
 #[command]
@@ -103,9 +105,15 @@ pub async fn start_host(port: u16, password: Option<String>) -> Result<(), Strin
     
     // This runs in a separate thread to avoid blocking the UI
     thread::spawn(move || {
-        let client = Client::init().unwrap();
-        if let Err(e) = run_host(client, port, password, tx) {
-            eprintln!("Host error: {}", e);
+        match Client::init() {
+            Ok(client) => {
+                if let Err(e) = run_host(client, port, password, tx) {
+                    eprintln!("Host error: {}", e);
+                }
+            }
+            Err(e) => {
+                eprintln!("Steam 初始化失败: {}", e);
+            }
         }
     });
 
@@ -124,14 +132,35 @@ pub async fn join_lobby(lobby_id_str: String, password: Option<String>) -> Resul
         .map_err(|_| "Invalid Lobby ID")?;
     let lobby_id = LobbyId::from_raw(lobby_id_u64);
 
-    // Store the lobby ID we're joining
-    *LOBBY_ID.lock().unwrap() = Some(lobby_id_u64);
+    // Create channel to receive connection result
+    let (tx, rx) = mpsc::channel();
 
     thread::spawn(move || {
-        let client = Client::init().unwrap();
-        if let Err(e) = run_client(client, lobby_id, password) {
-            eprintln!("Client error: {}", e);
+        match Client::init() {
+            Ok(client) => {
+                match run_client(client, lobby_id, password, tx.clone()) {
+                    Ok(_) => {}
+                    Err(e) => {
+                        eprintln!("Client error: {}", e);
+                        let _ = tx.send(Err(format!("客户端错误: {}", e)));
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("Steam 初始化失败: {}", e);
+                let _ = tx.send(Err(format!("Steam 未运行或初始化失败: {}", e)));
+            }
         }
     });
-    Ok(())
+
+    // Wait for connection result (success or error)
+    match rx.recv_timeout(std::time::Duration::from_secs(30)) {
+        Ok(Ok(())) => {
+            // Store the lobby ID after successful connection
+            *LOBBY_ID.lock().unwrap() = Some(lobby_id_u64);
+            Ok(())
+        }
+        Ok(Err(e)) => Err(e),
+        Err(_) => Err("连接超时".to_string()),
+    }
 }

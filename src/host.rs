@@ -101,22 +101,27 @@ pub fn run_host(client: Client, port: u16, password: Option<String>, lobby_id_tx
 
         // Handle listen socket events first so connections are ready before data flows
         while let Some(event) = listen_socket.try_receive_event() {
-            info!("📥 收到 ListenSocket 事件");
+            info!("📥 收到 ListenSocket 事件: {:?}", std::mem::discriminant(&event));
             match event {
                 ListenSocketEvent::Connecting(request) => {
                     let remote = request.remote();
                     info!(
-                        "🔔 收到 NetworkingSockets 连接请求: {}",
-                        remote.debug_string()
+                        "🔔 收到连接请求: {} (Steam ID: {:?})",
+                        remote.debug_string(),
+                        remote.steam_id()
                     );
-                    if let Err(err) = request.accept() {
-                        error!("✗ 无法接受连接: {err:?}");
-                    } else {
-                        info!("✓ 连接请求已接受，等待 Connected 事件...");
+                    match request.accept() {
+                        Ok(_) => {
+                            info!("✓ 连接请求已接受，等待 Connected 事件...");
+                        }
+                        Err(err) => {
+                            error!("✗ 接受连接失败: {:?} - 这可能导致客户端收到 ClosedByPeer", err);
+                        }
                     }
                 }
                 ListenSocketEvent::Connected(connected) => {
                     let remote = connected.remote();
+                    info!("🎉 连接已建立: {} (Steam ID: {:?})", remote.debug_string(), remote.steam_id());
                     if let Some(steam_id) = remote.steam_id() {
                         let connection = connected.take_connection();
 

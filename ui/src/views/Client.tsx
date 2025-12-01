@@ -356,22 +356,41 @@ export const Client: React.FC<ClientProps> = ({
                     mt-4 p-4 rounded-xl
                     bg-white/5 backdrop-blur-sm
                     border border-white/10
-                    space-y-3
+                    space-y-4
                   "
                   >
+                    {/* 方式1: LAN 自动发现 */}
                     <div className="flex items-center space-x-3">
                       <div className="p-2 rounded-lg bg-purple-500/20 border border-purple-500/30">
                         <Globe size={20} className="text-purple-300" />
                       </div>
                       <div className="flex-1">
                         <p className="text-sm font-medium text-white/70 mb-1">
-                          请在 MC 中连接
+                          方式一：自动发现
                         </p>
                         <p className="text-lg font-bold text-white/95 tracking-wide">
-                          LAN world
+                          多人游戏 → 查找 "LAN world"
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* 分隔线 */}
+                    <div className="border-t border-white/10"></div>
+
+                    {/* 方式2: 手动连接 */}
+                    <div className="flex items-center space-x-3">
+                      <div className="p-2 rounded-lg bg-blue-500/20 border border-blue-500/30">
+                        <Server size={20} className="text-blue-300" />
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-white/70 mb-1">
+                          方式二：手动连接（如自动发现失败）
+                        </p>
+                        <p className="text-lg font-bold text-white/95 tracking-wide font-mono">
+                          127.0.0.1:55555
                         </p>
                         <p className="text-xs text-white/50 mt-1">
-                          (虚拟局域网)
+                          多人游戏 → 直接连接 → 输入上方地址
                         </p>
                       </div>
                     </div>
