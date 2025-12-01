@@ -64,41 +64,31 @@ jobs:
       - name: Build release
         run: cargo build --release --target ${{ matrix.target }}
 
-      - name: Copy Steam API library (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
-        run: |
-          $steamApiPath = Get-ChildItem -Path "target/${{ matrix.target }}/release/build" -Recurse -Filter "steam_api64.dll" | Select-Object -First 1
-          if ($steamApiPath) {
-            Copy-Item $steamApiPath.FullName -Destination "target/${{ matrix.target }}/release/"
-          }
-
-      - name: Copy Steam API library (Linux)
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          STEAM_API=$(find target/${{ matrix.target }}/release/build -name "libsteam_api.so" 2>/dev/null | head -1)
-          if [ -n "$STEAM_API" ]; then
-            cp "$STEAM_API" target/${{ matrix.target }}/release/
-          fi
-
-      - name: Copy Steam API library (macOS)
-        if: matrix.os == 'macos-latest'
-        run: |
-          STEAM_API=$(find target/${{ matrix.target }}/release/build -name "libsteam_api.dylib" 2>/dev/null | head -1)
-          if [ -n "$STEAM_API" ]; then
-            cp "$STEAM_API" target/${{ matrix.target }}/release/
-          fi
-
       - name: Create artifact directory
         shell: bash
         run: |
           mkdir -p artifact
           cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} artifact/
           cp steam_appid.txt artifact/ 2>/dev/null || true
-          # Copy Steam API libs if they exist
-          cp target/${{ matrix.target }}/release/steam_api64.dll artifact/ 2>/dev/null || true
-          cp target/${{ matrix.target }}/release/libsteam_api.so artifact/ 2>/dev/null || true
-          cp target/${{ matrix.target }}/release/libsteam_api.dylib artifact/ 2>/dev/null || true
+          # Copy Steam API libs - search in multiple locations
+          if [ "${{ matrix.os }}" == "windows-latest" ]; then
+            STEAM_DLL=$(find target/${{ matrix.target }}/release -name "steam_api64.dll" 2>/dev/null | head -1)
+            if [ -n "$STEAM_DLL" ]; then
+              cp "$STEAM_DLL" artifact/
+            fi
+          elif [ "${{ matrix.os }}" == "ubuntu-latest" ]; then
+            STEAM_SO=$(find target/${{ matrix.target }}/release -name "libsteam_api.so" 2>/dev/null | head -1)
+            if [ -n "$STEAM_SO" ]; then
+              cp "$STEAM_SO" artifact/
+            fi
+          else
+            STEAM_DYLIB=$(find target/${{ matrix.target }}/release -name "libsteam_api.dylib" 2>/dev/null | head -1)
+            if [ -n "$STEAM_DYLIB" ]; then
+              cp "$STEAM_DYLIB" artifact/
+            fi
+          fi
+          echo "=== Artifact contents ==="
+          ls -la artifact/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -134,45 +124,53 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Generated version: $VERSION"
 
+      - name: Get commit info
+        id: commit
+        run: |
+          # 获取完整的 commit 信息
+          COMMIT_MSG=$(git log -1 --pretty=format:"%s")
+          COMMIT_BODY=$(git log -1 --pretty=format:"%b")
+          COMMIT_AUTHOR=$(git log -1 --pretty=format:"%an")
+          COMMIT_EMAIL=$(git log -1 --pretty=format:"%ae")
+          COMMIT_DATE=$(git log -1 --pretty=format:"%ci")
+
+          # 使用 heredoc 处理多行内容
+          echo "message<<EOF" >> $GITHUB_OUTPUT
+          echo "$COMMIT_MSG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+          echo "body<<EOF" >> $GITHUB_OUTPUT
+          echo "$COMMIT_BODY" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+          echo "author=$COMMIT_AUTHOR" >> $GITHUB_OUTPUT
+          echo "email=$COMMIT_EMAIL" >> $GITHUB_OUTPUT
+          echo "date=$COMMIT_DATE" >> $GITHUB_OUTPUT
+
       - name: Create archives
         run: |
           cd artifacts
           for dir in */; do
             name="${dir%/}"
+            # 进入目录，直接打包内容（避免多余的目录层级）
             if [[ "$name" == *"windows"* ]]; then
-              # Windows: look for .msi or .exe files
-              if find "$dir" -name "*.msi" | grep -q .; then
-                find "$dir" -name "*.msi" -exec cp {} "../${name}.msi" \;
-              elif find "$dir" -name "*.exe" | grep -q .; then
-                find "$dir" -name "*.exe" -exec cp {} "../${name}-setup.exe" \;
-              else
-                zip -r "../${name}.zip" "$dir"
-              fi
-            elif [[ "$name" == *"macos"* ]]; then
-              # macOS: look for .dmg or .app files
-              if find "$dir" -name "*.dmg" | grep -q .; then
-                find "$dir" -name "*.dmg" -exec cp {} "../${name}.dmg" \;
-              elif find "$dir" -name "*.app" -type d | grep -q .; then
-                APP_DIR=$(find "$dir" -name "*.app" -type d | head -1)
-                tar -czvf "../${name}.app.tar.gz" -C "$(dirname "$APP_DIR")" "$(basename "$APP_DIR")"
-              else
-                tar -czvf "../${name}.tar.gz" "$dir"
-              fi
+              # Windows: 创建 zip，直接包含文件（无嵌套目录）
+              cd "$dir"
+              zip -r "../../${name}.zip" ./*
+              cd ..
             else
-              # Linux: look for .deb, .AppImage, or .rpm
-              if find "$dir" -name "*.deb" | grep -q .; then
-                find "$dir" -name "*.deb" -exec cp {} "../${name}.deb" \;
-              elif find "$dir" -name "*.AppImage" | grep -q .; then
-                find "$dir" -name "*.AppImage" -exec cp {} "../${name}.AppImage" \;
-              elif find "$dir" -name "*.rpm" | grep -q .; then
-                find "$dir" -name "*.rpm" -exec cp {} "../${name}.rpm" \;
-              else
-                tar -czvf "../${name}.tar.gz" "$dir"
-              fi
+              # Linux/macOS: 创建 tar.gz，直接包含文件
+              cd "$dir"
+              tar -czvf "../../${name}.tar.gz" ./*
+              cd ..
             fi
           done
           cd ..
-          ls -la *.zip *.tar.gz *.msi *.exe *.dmg *.deb *.AppImage *.rpm 2>/dev/null || true
+          echo "=== Created archives ==="
+          ls -la *.zip *.tar.gz 2>/dev/null || true
+          # 验证 zip 内容
+          echo "=== Windows zip contents ==="
+          unzip -l MCconnectRust-windows-x64.zip 2>/dev/null || true
 
       - name: Create Git Tag
         run: |
@@ -189,15 +187,27 @@ jobs:
           body: |
             ## 自动构建 Release
 
-            **提交**: ${{ github.sha }}
+            ### 提交信息
+            **提交**: [`${{ github.sha }}`](https://github.com/${{ github.repository }}/commit/${{ github.sha }})
+            **作者**: ${{ steps.commit.outputs.author }} <${{ steps.commit.outputs.email }}>
+            **时间**: ${{ steps.commit.outputs.date }}
             **分支**: main
-            **构建时间**: ${{ github.event.head_commit.timestamp }}
+
+            #### 提交标题
+            ${{ steps.commit.outputs.message }}
+
+            #### 提交详情
+            ${{ steps.commit.outputs.body }}
+
+            ---
 
             ### 下载
-            - **Windows x64**: `MCconnectRust-windows-x64.msi` 或 `MCconnectRust-windows-x64-setup.exe`
-            - **Linux x64**: `MCconnectRust-linux-x64.deb` 或 `MCconnectRust-linux-x64.AppImage`
-            - **macOS Intel**: `MCconnectRust-macos-x64.dmg`
-            - **macOS Apple Silicon**: `MCconnectRust-macos-arm64.dmg`
+            | 平台 | 文件 |
+            |------|------|
+            | Windows x64 | `MCconnectRust-windows-x64.zip` |
+            | Linux x64 | `MCconnectRust-linux-x64.tar.gz` |
+            | macOS Intel | `MCconnectRust-macos-x64.tar.gz` |
+            | macOS Apple Silicon | `MCconnectRust-macos-arm64.tar.gz` |
 
             ### 使用说明
             1. 下载对应平台的压缩包
