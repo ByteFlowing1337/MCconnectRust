@@ -40,10 +40,18 @@ pub fn get_lobby_id() -> Option<u64> {
 }
 
 #[command]
-pub fn detect_minecraft_server() -> Option<minecraft_discovery::MinecraftServer> {
+pub async fn detect_minecraft_server() -> Option<minecraft_discovery::MinecraftServer> {
     info!("Tauri: 收到自动检测 Minecraft 服务器请求");
 
-    match minecraft_discovery::discover_minecraft_server() {
+    // 使用 spawn_blocking 在单独的线程中运行阻塞操作，避免阻塞 Tauri 主线程
+    let result = tauri::async_runtime::spawn_blocking(|| {
+        minecraft_discovery::discover_minecraft_server()
+    })
+    .await
+    .ok()
+    .flatten();
+
+    match result {
         Some(server) => {
             info!(
                 "Tauri: 检测到服务器 - {} ({}:{}) at {:.2}ms",

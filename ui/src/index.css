@@ -3,14 +3,17 @@
 @tailwind utilities;
 
 @layer base {
-  html, body {
+  html,
+  body {
     @apply bg-gradient-to-br from-gray-900 via-gray-800 to-black;
-    min-height: 100%;
+    min-height: 100vh;
     height: auto;
+    overflow-x: hidden;
   }
-  
+
   #root {
     min-height: 100vh;
+    height: auto;
   }
 }
 
@@ -23,11 +26,11 @@
       transform: translateX(100%);
     }
   }
-  
+
   .animate-shimmer {
     animation: shimmer 2s infinite;
   }
-  
+
   @keyframes fade-in {
     from {
       opacity: 0;
@@ -38,8 +41,18 @@
       transform: translateY(0);
     }
   }
-  
+
   .animate-fade-in {
     animation: fade-in 0.4s ease-out;
+  }
+
+  /* Hide scrollbar but keep scroll functionality */
+  .custom-scrollbar {
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* IE and Edge */
+  }
+
+  .custom-scrollbar::-webkit-scrollbar {
+    display: none; /* Chrome, Safari, Opera */
   }
 }

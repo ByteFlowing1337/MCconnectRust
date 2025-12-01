@@ -1,12 +1,20 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Card } from '../components/Card';
-import { Button } from '../components/Button';
-import { PerformancePanel } from '../components/PerformancePanel';
-import { ArrowLeft, Play, Loader2, Copy, Check, Radio, Sparkles } from 'lucide-react';
-import { invoke } from '@tauri-apps/api/core';
+import React, { useState, useEffect, useRef } from "react";
+import { Card } from "../components/Card";
+import { Button } from "../components/Button";
+import { PerformancePanel } from "../components/PerformancePanel";
+import {
+  ArrowLeft,
+  Play,
+  Loader2,
+  Copy,
+  Check,
+  Radio,
+  Sparkles,
+} from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
 
 interface ConnectionState {
-  type: 'host' | 'client' | null;
+  type: "host" | "client" | null;
   lobbyId: string | null;
   port: number | null;
 }
@@ -35,46 +43,53 @@ interface MinecraftServerInfo {
   motd: string;
 }
 
-export const Host: React.FC<HostProps> = ({ onBack, connectionState, onConnectionChange }) => {
-  const [port, setPort] = useState('25565');
-  const [password, setPassword] = useState('');
-  const [status, setStatus] = useState<'idle' | 'running' | 'error'>('idle');
-  const [message, setMessage] = useState('正在自动检测 Minecraft 服务器...');
+export const Host: React.FC<HostProps> = ({
+  onBack,
+  connectionState,
+  onConnectionChange,
+}) => {
+  const [port, setPort] = useState("25565");
+  const [password, setPassword] = useState("");
+  const [status, setStatus] = useState<"idle" | "running" | "error">("idle");
+  const [message, setMessage] = useState("正在自动检测 Minecraft 服务器...");
   const [lobbyId, setLobbyId] = useState<string | null>(null);
 
   // 检查是否有活跃的连接，恢复状态
   useEffect(() => {
     const restoreState = async () => {
       try {
-        const id = await invoke<number | null>('get_lobby_id');
+        const id = await invoke<number | null>("get_lobby_id");
         if (id) {
           const idStr = id.toString();
           setLobbyId(idStr);
-          setStatus('running');
-          setMessage('主机运行中... 请将房间号分享给好友');
+          setStatus("running");
+          setMessage("主机运行中... 请将房间号分享给好友");
           setDetecting(false); // 停止检测
-          
+
           // 从全局状态恢复端口号
           if (connectionState?.port) {
             setPort(connectionState.port.toString());
           }
-          
+
           // 通知父组件连接状态
           if (onConnectionChange) {
             onConnectionChange(idStr, connectionState?.port || null);
           }
-        } else if (connectionState?.lobbyId && connectionState.type === 'host') {
+        } else if (
+          connectionState?.lobbyId &&
+          connectionState.type === "host"
+        ) {
           // 如果后端没有连接但全局状态有，可能是状态不同步，尝试恢复UI
           setLobbyId(connectionState.lobbyId);
-          setStatus('running');
-          setMessage('主机运行中... 请将房间号分享给好友');
+          setStatus("running");
+          setMessage("主机运行中... 请将房间号分享给好友");
           setDetecting(false); // 停止检测
           if (connectionState.port) {
             setPort(connectionState.port.toString());
           }
         }
       } catch (e) {
-        console.error('Failed to check connection:', e);
+        console.error("Failed to check connection:", e);
       }
     };
     restoreState();
@@ -82,13 +97,16 @@ export const Host: React.FC<HostProps> = ({ onBack, connectionState, onConnectio
   const [copied, setCopied] = useState(false);
   const [metrics, setMetrics] = useState<PerformanceMetrics | null>(null);
   const [detecting, setDetecting] = useState(true);
-  const [detectedServer, setDetectedServer] = useState<MinecraftServerInfo | null>(null);
+  const [detectedServer, setDetectedServer] =
+    useState<MinecraftServerInfo | null>(null);
   const [detectionAttempts, setDetectionAttempts] = useState(0);
   const detectionIntervalRef = useRef<number | null>(null);
+  const attemptsRef = useRef(0);
+  const isDetectingRef = useRef(false); // 防止重复请求
 
   // 当状态恢复为running时，停止检测
   useEffect(() => {
-    if (status === 'running') {
+    if (status === "running") {
       setDetecting(false);
       if (detectionIntervalRef.current) {
         clearInterval(detectionIntervalRef.current);
@@ -100,29 +118,54 @@ export const Host: React.FC<HostProps> = ({ onBack, connectionState, onConnectio
   // 自动轮询检测 Minecraft 服务器
   useEffect(() => {
     // 如果已经检测到服务器或正在运行，不进行检测
-    if (detectedServer || status === 'running') {
+    if (detectedServer || status === "running") {
       return;
     }
 
+    // 最大尝试次数限制
+    const MAX_ATTEMPTS = 10;
+    // 重置尝试计数
+    attemptsRef.current = 0;
+    setDetectionAttempts(0);
+
     const performDetection = async () => {
+      // 如果上一次检测还在进行中，跳过本次
+      if (isDetectingRef.current) {
+        return;
+      }
+
+      // 达到最大尝试次数后停止
+      if (attemptsRef.current >= MAX_ATTEMPTS) {
+        setDetecting(false);
+        setMessage(`未能检测到 Minecraft 服务器，请手动输入端口号`);
+        if (detectionIntervalRef.current) {
+          clearInterval(detectionIntervalRef.current);
+          detectionIntervalRef.current = null;
+        }
+        return;
+      }
+
+      isDetectingRef.current = true;
       setDetecting(true);
-      setDetectionAttempts(prev => {
-        const newAttempts = prev + 1;
-        // 更新消息显示当前尝试次数
-        setMessage(`正在搜索本地 Minecraft 服务器... (尝试 ${newAttempts})`);
-        return newAttempts;
-      });
-      
+      attemptsRef.current += 1;
+      const currentAttempt = attemptsRef.current;
+      setDetectionAttempts(currentAttempt);
+      setMessage(
+        `正在搜索本地 Minecraft 服务器... (尝试 ${currentAttempt}/${MAX_ATTEMPTS})`
+      );
+
       try {
-        const server = await invoke<MinecraftServerInfo | null>('detect_minecraft_server');
-        
+        const server = await invoke<MinecraftServerInfo | null>(
+          "detect_minecraft_server"
+        );
+
         if (server) {
           // 检测到服务器，自动停止轮询
           setPort(server.port.toString());
           setDetectedServer(server);
           setDetecting(false);
           setMessage(`✓ 已自动检测到服务器: ${server.motd}`);
-          
+
           // 清除轮询
           if (detectionIntervalRef.current) {
             clearInterval(detectionIntervalRef.current);
@@ -130,10 +173,11 @@ export const Host: React.FC<HostProps> = ({ onBack, connectionState, onConnectio
           }
         }
       } catch (e) {
-        console.error('检测失败:', e);
-        setMessage(`检测失败，继续尝试...`);
+        console.error("检测失败:", e);
+        // 不显示每次失败的错误，只在达到最大次数时提示
+      } finally {
+        isDetectingRef.current = false;
       }
-      // 注意：这里不设置 setDetecting(false)，因为要继续轮询直到检测到服务器
     };
 
     // 立即执行一次检测
@@ -149,7 +193,7 @@ export const Host: React.FC<HostProps> = ({ onBack, connectionState, onConnectio
         detectionIntervalRef.current = null;
       }
     };
-  }, [detectedServer, status]); // 当检测到服务器或状态改变时重新运行
+  }, [detectedServer, status]); // 移除 detectionAttempts 避免死循环
 
   const handleStart = async () => {
     // 停止检测
@@ -158,35 +202,35 @@ export const Host: React.FC<HostProps> = ({ onBack, connectionState, onConnectio
       detectionIntervalRef.current = null;
     }
     setDetecting(false);
-    
-    setStatus('running');
-    setMessage('正在启动主机...');
+
+    setStatus("running");
+    setMessage("正在启动主机...");
     try {
-      await invoke('start_host', { 
+      await invoke("start_host", {
         port: parseInt(port),
-        password: password.trim() || null
+        password: password.trim() || null,
       });
-      setMessage('主机运行中... 正在获取房间号...');
-      
+      setMessage("主机运行中... 正在获取房间号...");
+
       // Wait a bit for lobby creation, then fetch lobby ID once
       setTimeout(async () => {
         try {
-          const id = await invoke<number | null>('get_lobby_id');
+          const id = await invoke<number | null>("get_lobby_id");
           if (id) {
             const idStr = id.toString();
             setLobbyId(idStr);
-            setMessage('主机运行中... 请将房间号分享给好友');
+            setMessage("主机运行中... 请将房间号分享给好友");
             // 通知父组件连接状态变化
             if (onConnectionChange) {
               onConnectionChange(idStr, parseInt(port));
             }
           }
         } catch (e) {
-          console.error('Failed to get lobby ID:', e);
+          console.error("Failed to get lobby ID:", e);
         }
       }, 1000);
     } catch (e) {
-      setStatus('error');
+      setStatus("error");
       setMessage(`启动失败: ${e}`);
     }
   };
@@ -201,31 +245,33 @@ export const Host: React.FC<HostProps> = ({ onBack, connectionState, onConnectio
 
   // Poll performance metrics every 2 seconds when running
   useEffect(() => {
-    if (status !== 'running') return;
-    
+    if (status !== "running") return;
+
     // 立即获取一次性能指标
     const fetchMetrics = async () => {
       try {
-        const data = await invoke<PerformanceMetrics>('get_performance_metrics');
+        const data = await invoke<PerformanceMetrics>(
+          "get_performance_metrics"
+        );
         setMetrics(data);
       } catch (e) {
-        console.error('Failed to get metrics:', e);
+        console.error("Failed to get metrics:", e);
       }
     };
     fetchMetrics();
-    
+
     const interval = setInterval(fetchMetrics, 2000);
 
     return () => clearInterval(interval);
   }, [status]);
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-full w-full py-8 animate-fade-in">
-      <Card className="w-full max-w-lg space-y-8">
+    <div className="flex flex-col items-center justify-start w-full py-6 animate-fade-in">
+      <Card className="w-full max-w-lg space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
-          <button 
-            onClick={onBack} 
+          <button
+            onClick={onBack}
             className="
               p-2 rounded-2xl 
               bg-white/5 hover:bg-white/10 
@@ -237,30 +283,37 @@ export const Host: React.FC<HostProps> = ({ onBack, connectionState, onConnectio
           >
             <ArrowLeft size={20} />
           </button>
-          <h2 className="text-3xl font-bold text-white/95 tracking-tight">创建房间</h2>
+          <h2 className="text-3xl font-bold text-white/95 tracking-tight">
+            创建房间
+          </h2>
           <div className="w-10" /> {/* Spacer for centering */}
         </div>
 
         <div className="space-y-6">
           {/* Server Detection Status */}
-          <div className="
+          <div
+            className="
             relative overflow-hidden
             bg-gradient-to-br from-blue-500/10 via-purple-500/10 to-pink-500/10
             backdrop-blur-xl border border-white/20
             rounded-2xl p-6
             shadow-lg shadow-blue-500/10
-          ">
+          "
+          >
             <div className="flex items-start space-x-4">
-              <div className={`
+              <div
+                className={`
                 p-3 rounded-2xl
-                ${detecting 
-                  ? 'bg-blue-500/20 animate-pulse' 
-                  : detectedServer 
-                    ? 'bg-green-500/20' 
-                    : 'bg-white/10'
+                ${
+                  detecting
+                    ? "bg-blue-500/20 animate-pulse"
+                    : detectedServer
+                    ? "bg-green-500/20"
+                    : "bg-white/10"
                 }
                 transition-all duration-300
-              `}>
+              `}
+              >
                 {detecting ? (
                   <Loader2 size={24} className="text-blue-400 animate-spin" />
                 ) : detectedServer ? (
@@ -270,23 +323,27 @@ export const Host: React.FC<HostProps> = ({ onBack, connectionState, onConnectio
                 )}
               </div>
               <div className="flex-1 min-w-0">
-                <h3 className="text-sm font-semibold text-white/60 mb-1">服务器检测</h3>
+                <h3 className="text-sm font-semibold text-white/60 mb-1">
+                  服务器检测
+                </h3>
                 <p className="text-base text-white/90 font-medium leading-relaxed">
-                  {detecting 
+                  {detecting
                     ? `正在搜索本地 Minecraft 服务器... (尝试 ${detectionAttempts})`
-                    : detectedServer 
-                      ? `已检测到: ${detectedServer.motd}`
-                      : '未检测到服务器'
-                  }
+                    : detectedServer
+                    ? `已检测到: ${detectedServer.motd}`
+                    : "未检测到服务器"}
                 </p>
                 {detectedServer && (
                   <p className="text-xs text-white/50 mt-2">
-                    端口: <span className="font-mono font-semibold text-white/70">{detectedServer.port}</span>
+                    端口:{" "}
+                    <span className="font-mono font-semibold text-white/70">
+                      {detectedServer.port}
+                    </span>
                   </p>
                 )}
               </div>
             </div>
-            
+
             {/* Animated background effect */}
             {detecting && (
               <div className="absolute inset-0 opacity-20">
@@ -320,13 +377,15 @@ export const Host: React.FC<HostProps> = ({ onBack, connectionState, onConnectio
                   shadow-lg shadow-black/10
                 "
                 placeholder="25565"
-                disabled={status === 'running'}
+                disabled={status === "running"}
               />
               {detectedServer && (
                 <div className="absolute right-4 top-1/2 -translate-y-1/2">
                   <div className="flex items-center space-x-2 px-3 py-1.5 rounded-xl bg-green-500/20 border border-green-500/30">
                     <Check size={16} className="text-green-400" />
-                    <span className="text-xs font-medium text-green-300">已检测</span>
+                    <span className="text-xs font-medium text-green-300">
+                      已检测
+                    </span>
                   </div>
                 </div>
               )}
@@ -336,7 +395,8 @@ export const Host: React.FC<HostProps> = ({ onBack, connectionState, onConnectio
           {/* Password Input */}
           <div>
             <label className="block text-sm font-semibold text-white/70 mb-3 tracking-wide">
-              房间密码 <span className="text-xs text-white/40 font-normal">(可选)</span>
+              房间密码{" "}
+              <span className="text-xs text-white/40 font-normal">(可选)</span>
             </label>
             <input
               type="password"
@@ -357,24 +417,29 @@ export const Host: React.FC<HostProps> = ({ onBack, connectionState, onConnectio
                 shadow-lg shadow-black/10
               "
               placeholder="留空则不设置密码"
-              disabled={status === 'running'}
+              disabled={status === "running"}
             />
           </div>
 
           {/* Lobby ID Display */}
           {lobbyId && (
-            <div className="
+            <div
+              className="
               bg-gradient-to-br from-blue-500/15 via-purple-500/15 to-pink-500/15
               backdrop-blur-xl border border-white/20
               rounded-2xl p-6
               shadow-lg shadow-purple-500/10
-            ">
+            "
+            >
               <div className="flex items-center space-x-2 mb-3">
                 <Sparkles size={18} className="text-purple-400" />
-                <label className="text-sm font-semibold text-purple-300">房间号 (Lobby ID)</label>
+                <label className="text-sm font-semibold text-purple-300">
+                  房间号 (Lobby ID)
+                </label>
               </div>
               <div className="flex items-center space-x-3">
-                <code className="
+                <code
+                  className="
                   flex-1 
                   bg-black/30 backdrop-blur-sm
                   border border-white/10
@@ -382,7 +447,8 @@ export const Host: React.FC<HostProps> = ({ onBack, connectionState, onConnectio
                   text-white font-mono text-xl font-semibold
                   tracking-wider
                   shadow-inner
-                ">
+                "
+                >
                   {lobbyId}
                 </code>
                 <button
@@ -411,7 +477,8 @@ export const Host: React.FC<HostProps> = ({ onBack, connectionState, onConnectio
           )}
 
           {/* Status Message */}
-          <div className="
+          <div
+            className="
             bg-white/5 backdrop-blur-xl
             border border-white/10
             rounded-2xl p-5
@@ -419,20 +486,21 @@ export const Host: React.FC<HostProps> = ({ onBack, connectionState, onConnectio
             text-sm text-white/80 font-medium
             leading-relaxed
             shadow-inner
-          ">
-            {message || '准备就绪，点击开始创建房间...'}
+          "
+          >
+            {message || "准备就绪，点击开始创建房间..."}
           </div>
 
           {/* Performance Panel */}
-          {status === 'running' && <PerformancePanel metrics={metrics} />}
+          {status === "running" && <PerformancePanel metrics={metrics} />}
 
           {/* Start Button */}
-          <Button 
-            onClick={handleStart} 
-            disabled={status === 'running' || !port}
+          <Button
+            onClick={handleStart}
+            disabled={status === "running" || !port}
             className="w-full py-4 text-lg"
           >
-            {status === 'running' ? (
+            {status === "running" ? (
               <>
                 <Loader2 size={22} className="animate-spin" />
                 <span>运行中</span>
